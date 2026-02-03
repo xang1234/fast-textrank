@@ -9,7 +9,6 @@
 use crate::graph::builder::GraphBuilder;
 use crate::graph::csr::CsrGraph;
 use crate::pagerank::personalized::{position_based_personalization, PersonalizedPageRank};
-use crate::pagerank::PageRankResult;
 use crate::phrase::extraction::PhraseExtractor;
 use crate::types::{Phrase, TextRankConfig, Token};
 use rustc_hash::FxHashMap;

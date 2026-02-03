@@ -185,7 +185,7 @@ impl TopicRank {
     /// Build a graph where nodes are clusters and edges connect co-occurring clusters
     fn build_cluster_graph(
         &self,
-        tokens: &[Token],
+        _tokens: &[Token],
         clusters: &[Vec<usize>],
     ) -> (CsrGraph, Vec<Vec<usize>>) {
         let mut builder = GraphBuilder::with_capacity(clusters.len());

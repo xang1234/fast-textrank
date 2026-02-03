@@ -105,8 +105,9 @@ impl NounChunker {
                 // Validate length constraints
                 let len = span.end_token - span.start_token;
                 if len >= self.config.min_length && len <= self.config.max_length {
+                    let next_i = span.end_token - tokens[0].token_idx; // Move past this chunk
                     chunks.push(span);
-                    i = span.end_token - tokens[0].token_idx; // Move past this chunk
+                    i = next_i;
                     continue;
                 }
             }
