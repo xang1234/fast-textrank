@@ -100,6 +100,10 @@ impl NounChunker {
         let mut i = 0;
 
         while i < tokens.len() {
+            if tokens[i].is_stopword {
+                i += 1;
+                continue;
+            }
             // Try to match a noun phrase pattern
             if let Some(span) = self.match_noun_phrase(tokens, i) {
                 // Validate length constraints
@@ -124,6 +128,9 @@ impl NounChunker {
         }
 
         let mut end = start;
+        if tokens[end].is_stopword {
+            return None;
+        }
         let first_token = tokens[start];
 
         // Optional determiner
@@ -139,20 +146,21 @@ impl NounChunker {
         }
 
         // Optional adjectives
-        while end < tokens.len() && tokens[end].pos == PosTag::Adjective {
+        while end < tokens.len() && !tokens[end].is_stopword && tokens[end].pos == PosTag::Adjective
+        {
             end += 1;
         }
 
         // Required: at least one noun
         let noun_start = end;
-        while end < tokens.len() && tokens[end].pos.is_noun() {
+        while end < tokens.len() && !tokens[end].is_stopword && tokens[end].pos.is_noun() {
             end += 1;
         }
 
         // Must have at least one noun
         if end == noun_start {
             // No nouns found - check if we're on a standalone noun
-            if start < tokens.len() && tokens[start].pos.is_noun() {
+            if start < tokens.len() && !tokens[start].is_stopword && tokens[start].pos.is_noun() {
                 return Some(ChunkSpan {
                     start_token: tokens[start].token_idx,
                     end_token: tokens[start].token_idx + 1,

@@ -96,6 +96,13 @@ impl PyTextRankResult {
     }
 }
 
+/// Get the built-in stopword list for a language.
+#[pyfunction]
+#[pyo3(signature = (language = "en"))]
+pub fn get_stopwords(language: &str) -> PyResult<Vec<String>> {
+    Ok(StopwordFilter::built_in_list(language))
+}
+
 /// Configuration for TextRank
 #[pyclass(name = "TextRankConfig")]
 #[derive(Clone)]
@@ -117,7 +124,8 @@ impl PyTextRankConfig {
         score_aggregation="sum",
         language="en",
         use_edge_weights=true,
-        include_pos=None
+        include_pos=None,
+        stopwords=None
     ))]
     #[allow(clippy::too_many_arguments)]
     fn new(
@@ -132,6 +140,7 @@ impl PyTextRankConfig {
         language: &str,
         use_edge_weights: bool,
         include_pos: Option<Vec<String>>,
+        stopwords: Option<Vec<String>>,
     ) -> PyResult<Self> {
         let aggregation = match score_aggregation.to_lowercase().as_str() {
             "sum" => ScoreAggregation::Sum,
@@ -171,6 +180,7 @@ impl PyTextRankConfig {
             language: language.to_string(),
             use_edge_weights,
             include_pos: pos_tags,
+            stopwords: stopwords.unwrap_or_default(),
         };
 
         config
@@ -229,7 +239,11 @@ impl PyBaseTextRank {
         let (_sentences, mut tokens) = tokenizer.tokenize(text);
 
         // Apply stopword filter
-        let stopwords = StopwordFilter::new(&self.config.language);
+        let stopwords = if self.config.stopwords.is_empty() {
+            StopwordFilter::new(&self.config.language)
+        } else {
+            StopwordFilter::with_additional(&self.config.language, &self.config.stopwords)
+        };
         for token in &mut tokens {
             token.is_stopword = stopwords.is_stopword(&token.text);
         }
@@ -287,7 +301,11 @@ impl PyPositionRank {
         let tokenizer = Tokenizer::new();
         let (_, mut tokens) = tokenizer.tokenize(text);
 
-        let stopwords = StopwordFilter::new(&self.config.language);
+        let stopwords = if self.config.stopwords.is_empty() {
+            StopwordFilter::new(&self.config.language)
+        } else {
+            StopwordFilter::with_additional(&self.config.language, &self.config.stopwords)
+        };
         for token in &mut tokens {
             token.is_stopword = stopwords.is_stopword(&token.text);
         }
@@ -365,7 +383,11 @@ impl PyBiasedTextRank {
         let tokenizer = Tokenizer::new();
         let (_, mut tokens) = tokenizer.tokenize(text);
 
-        let stopwords = StopwordFilter::new(&self.config.language);
+        let stopwords = if self.config.stopwords.is_empty() {
+            StopwordFilter::new(&self.config.language)
+        } else {
+            StopwordFilter::with_additional(&self.config.language, &self.config.stopwords)
+        };
         for token in &mut tokens {
             token.is_stopword = stopwords.is_stopword(&token.text);
         }

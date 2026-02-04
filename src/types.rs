@@ -387,6 +387,9 @@ pub struct TextRankConfig {
     pub use_edge_weights: bool,
     /// POS tags to include in graph
     pub include_pos: Vec<PosTag>,
+    /// Optional additional stopwords list (extends the built-in list when provided)
+    #[serde(default)]
+    pub stopwords: Vec<String>,
 }
 
 impl Default for TextRankConfig {
@@ -403,6 +406,7 @@ impl Default for TextRankConfig {
             language: "en".to_string(),
             use_edge_weights: true,
             include_pos: vec![PosTag::Noun, PosTag::Adjective, PosTag::ProperNoun],
+            stopwords: Vec::new(),
         }
     }
 }

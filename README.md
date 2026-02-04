@@ -217,7 +217,7 @@ tuples = result.as_tuples()  # [(text, score), ...]
 
 ### JSON Interface
 
-For processing large documents or integrating with spaCy, use the JSON interface. This accepts pre-tokenized data to avoid re-tokenizing in Rust. Stopword filtering relies on each token's `is_stopword` field (the JSON config does not include `language`).
+For processing large documents or integrating with spaCy, use the JSON interface. This accepts pre-tokenized data to avoid re-tokenizing in Rust. Stopword handling can use each token's `is_stopword` field and/or a `config.language` plus `config.stopwords` (additional words that extend the built-in list). Language codes follow the Supported Languages table below.
 
 ```python
 from rapid_textrank import extract_from_json, extract_batch_from_json
@@ -238,7 +238,7 @@ doc = {
         },
         # ... more tokens
     ],
-    "config": {"top_n": 10}
+    "config": {"top_n": 10, "language": "en", "stopwords": ["nlp", "transformers"]}
 }
 
 result_json = extract_from_json(json.dumps(doc))
@@ -252,7 +252,7 @@ results = json.loads(results_json)
 
 ## Supported Languages
 
-Stopword filtering is available for 18 languages:
+Stopword filtering is available for 18 languages. Use these codes for the `language` parameter in all APIs (including JSON config):
 
 | Code | Language | Code | Language | Code | Language |
 |------|----------|------|----------|------|----------|
@@ -262,6 +262,13 @@ Stopword filtering is available for 18 languages:
 | `no` | Norwegian | `da` | Danish | `fi` | Finnish |
 | `hu` | Hungarian | `tr` | Turkish | `pl` | Polish |
 | `ar` | Arabic | `zh` | Chinese | `ja` | Japanese |
+
+You can inspect the built-in stopword list with:
+
+```python
+import rapid_textrank as rt
+rt.get_stopwords("en")
+```
 
 ## Performance
 

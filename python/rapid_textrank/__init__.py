@@ -15,6 +15,7 @@ from rapid_textrank._rust import (
     BiasedTextRank,
     extract_from_json,
     extract_batch_from_json,
+    get_stopwords,
 )
 
 __all__ = [
@@ -27,6 +28,7 @@ __all__ = [
     "BiasedTextRank",
     "extract_from_json",
     "extract_batch_from_json",
+    "get_stopwords",
 ]
 
 

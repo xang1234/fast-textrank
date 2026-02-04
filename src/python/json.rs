@@ -67,11 +67,16 @@ pub struct JsonConfig {
     pub max_phrase_length: usize,
     #[serde(default)]
     pub score_aggregation: String,
+    #[serde(default = "default_language")]
+    pub language: String,
     #[serde(default = "default_use_edge_weights")]
     pub use_edge_weights: bool,
     /// POS tags to include (e.g., ["NOUN", "ADJ", "PROPN"])
     #[serde(default)]
     pub include_pos: Vec<String>,
+    /// Additional stopwords list (extends built-in list when provided)
+    #[serde(default)]
+    pub stopwords: Vec<String>,
 }
 
 fn default_use_edge_weights() -> bool {
@@ -99,6 +104,9 @@ fn default_min_length() -> usize {
 fn default_max_length() -> usize {
     4
 }
+fn default_language() -> String {
+    "en".to_string()
+}
 
 impl Default for JsonConfig {
     fn default() -> Self {
@@ -111,8 +119,10 @@ impl Default for JsonConfig {
             min_phrase_length: default_min_length(),
             max_phrase_length: default_max_length(),
             score_aggregation: String::new(),
+            language: default_language(),
             use_edge_weights: default_use_edge_weights(),
             include_pos: Vec::new(),
+            stopwords: Vec::new(),
         }
     }
 }
@@ -145,9 +155,10 @@ impl From<JsonConfig> for TextRankConfig {
             min_phrase_length: jc.min_phrase_length,
             max_phrase_length: jc.max_phrase_length,
             score_aggregation: aggregation,
-            language: "en".to_string(),
+            language: jc.language,
             use_edge_weights: jc.use_edge_weights,
             include_pos,
+            stopwords: jc.stopwords,
         }
     }
 }
@@ -188,7 +199,19 @@ pub fn extract_from_json(json_input: &str) -> PyResult<String> {
     let config: TextRankConfig = doc.config.unwrap_or_default().into();
 
     // Convert tokens
-    let tokens: Vec<Token> = doc.tokens.into_iter().map(Token::from).collect();
+    let mut tokens: Vec<Token> = doc.tokens.into_iter().map(Token::from).collect();
+
+    if !config.stopwords.is_empty() {
+        let stopwords = crate::nlp::stopwords::StopwordFilter::with_additional(
+            &config.language,
+            &config.stopwords,
+        );
+        for token in &mut tokens {
+            if stopwords.is_stopword(&token.text) {
+                token.is_stopword = true;
+            }
+        }
+    }
 
     // Build graph with POS filtering from config
     let builder = GraphBuilder::from_tokens_with_pos(
@@ -260,7 +283,19 @@ pub fn extract_batch_from_json(json_input: &str) -> PyResult<String> {
         .into_iter()
         .map(|doc| {
             let config: TextRankConfig = doc.config.unwrap_or_default().into();
-            let tokens: Vec<Token> = doc.tokens.into_iter().map(Token::from).collect();
+            let mut tokens: Vec<Token> = doc.tokens.into_iter().map(Token::from).collect();
+
+            if !config.stopwords.is_empty() {
+                let stopwords = crate::nlp::stopwords::StopwordFilter::with_additional(
+                    &config.language,
+                    &config.stopwords,
+                );
+                for token in &mut tokens {
+                    if stopwords.is_stopword(&token.text) {
+                        token.is_stopword = true;
+                    }
+                }
+            }
 
             let builder = GraphBuilder::from_tokens_with_pos(
                 &tokens,

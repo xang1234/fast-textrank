@@ -50,6 +50,41 @@ impl StopwordFilter {
         }
     }
 
+    /// Create a stopword filter from a list of owned strings
+    pub fn from_strings(words: &[String]) -> Self {
+        let stopwords: FxHashSet<String> = words.iter().map(|w| w.to_lowercase()).collect();
+        Self {
+            stopwords,
+            case_sensitive: false,
+        }
+    }
+
+    /// Create a stopword filter using the built-in list plus additional words.
+    pub fn with_additional(language: &str, words: &[String]) -> Self {
+        let mut stopwords = Self::load_stopwords(language);
+        for word in words {
+            stopwords.insert(word.to_lowercase());
+        }
+        Self {
+            stopwords,
+            case_sensitive: false,
+        }
+    }
+
+    /// Return the built-in stopword list for a language (sorted).
+    pub fn built_in_list(language: &str) -> Vec<String> {
+        let mut list: Vec<String> = Self::load_stopwords(language).into_iter().collect();
+        list.sort_unstable();
+        list
+    }
+
+    /// Return the stopword list for this filter (sorted).
+    pub fn words(&self) -> Vec<String> {
+        let mut list: Vec<String> = self.stopwords.iter().cloned().collect();
+        list.sort_unstable();
+        list
+    }
+
     /// Set case sensitivity
     pub fn with_case_sensitive(mut self, case_sensitive: bool) -> Self {
         self.case_sensitive = case_sensitive;
