@@ -85,11 +85,8 @@ impl PhraseExtractor {
         chunks
             .iter()
             .map(|chunk| {
-                // Get tokens in this chunk
-                let chunk_tokens: Vec<_> = tokens
-                    .iter()
-                    .filter(|t| t.token_idx >= chunk.start_token && t.token_idx < chunk.end_token)
-                    .collect();
+                // Get tokens in this chunk via direct slice access (O(1) vs O(N) filter)
+                let chunk_tokens = &tokens[chunk.start_token..chunk.end_token];
 
                 // Collect PageRank scores for tokens in the chunk
                 let scores: Vec<f64> = chunk_tokens

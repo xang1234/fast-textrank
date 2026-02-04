@@ -163,11 +163,15 @@ impl TopicRank {
         }
 
         // Compute pairwise similarities and cluster
+        // Pre-filter: only compute Jaccard if sets share at least one stem
         for i in 0..n {
             for j in (i + 1)..n {
-                let sim = jaccard_similarity(&candidates[i].stems, &candidates[j].stems);
-                if sim >= self.similarity_threshold {
-                    union(&mut parent, i, j);
+                // Fast pre-filter: skip Jaccard for disjoint sets (sim would be 0)
+                if candidates[i].stems.iter().any(|s| candidates[j].stems.contains(s)) {
+                    let sim = jaccard_similarity(&candidates[i].stems, &candidates[j].stems);
+                    if sim >= self.similarity_threshold {
+                        union(&mut parent, i, j);
+                    }
                 }
             }
         }

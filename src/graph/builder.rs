@@ -5,8 +5,9 @@
 
 use crate::types::{PosTag, Token};
 use rayon::prelude::*;
-use rustc_hash::FxHashMap;
+use rustc_hash::{FxHashMap, FxHashSet};
 use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::Arc;
 
 /// A node in the graph builder
 #[derive(Debug, Clone)]
@@ -288,26 +289,42 @@ pub fn build_graph_parallel_with_pos(
         sentences.push(current_sent);
     }
 
-    // Build partial graphs in parallel
-    let partial_graphs: Vec<FxHashMap<(String, String), f64>> = sentences
-        .par_iter()
+    // Use specialized unweighted path for better deduplication with HashSet
+    if !use_weights {
+        return build_unweighted_parallel(sentences, window_size);
+    }
+
+    // Convert lemmas to Arc<str> once before parallel processing
+    // This avoids expensive String clones during edge pair creation
+    let sentences_with_arcs: Vec<Vec<(&Token, Arc<str>)>> = sentences
+        .iter()
         .map(|sent_tokens| {
+            sent_tokens
+                .iter()
+                .map(|&t| (t, Arc::from(t.lemma.as_str())))
+                .collect()
+        })
+        .collect();
+
+    // Build partial graphs in parallel using Arc<str> for cheap cloning
+    let partial_graphs: Vec<FxHashMap<(Arc<str>, Arc<str>), f64>> = sentences_with_arcs
+        .par_iter()
+        .map(|sent_token_pairs| {
             let mut edges = FxHashMap::default();
-            for i in 0..sent_tokens.len() {
-                for j in (i + 1)..std::cmp::min(i + window_size, sent_tokens.len()) {
-                    let (a, b) = if sent_tokens[i].lemma <= sent_tokens[j].lemma {
-                        (sent_tokens[i].lemma.clone(), sent_tokens[j].lemma.clone())
+            for i in 0..sent_token_pairs.len() {
+                for j in (i + 1)..std::cmp::min(i + window_size, sent_token_pairs.len()) {
+                    let arc_a = &sent_token_pairs[i].1;
+                    let arc_b = &sent_token_pairs[j].1;
+
+                    let (key_a, key_b) = if arc_a <= arc_b {
+                        (Arc::clone(arc_a), Arc::clone(arc_b))
                     } else {
-                        (sent_tokens[j].lemma.clone(), sent_tokens[i].lemma.clone())
+                        (Arc::clone(arc_b), Arc::clone(arc_a))
                     };
-                    if a != b {
-                        if use_weights {
-                            // Weighted mode: accumulate co-occurrence counts
-                            *edges.entry((a, b)).or_insert(0.0) += 1.0;
-                        } else {
-                            // Binary mode: edge exists (1.0) or doesn't
-                            edges.entry((a, b)).or_insert(1.0);
-                        }
+
+                    if key_a != key_b {
+                        // Weighted mode: accumulate co-occurrence counts
+                        *edges.entry((key_a, key_b)).or_insert(0.0) += 1.0;
                     }
                 }
             }
@@ -315,20 +332,63 @@ pub fn build_graph_parallel_with_pos(
         })
         .collect();
 
-    // Merge partial graphs - respect use_weights setting
+    // Merge partial graphs - accumulate weights across sentences
     let mut builder = GraphBuilder::new();
     for partial in partial_graphs {
         for ((a, b), weight) in partial {
-            let id_a = builder.get_or_create_node(&a);
-            let id_b = builder.get_or_create_node(&b);
-            if use_weights {
-                // Weighted mode: accumulate co-occurrence counts across sentences
-                builder.increment_edge(id_a, id_b, weight);
-            } else {
-                // Binary mode: edge exists (1.0) or doesn't, no accumulation
-                builder.set_edge(id_a, id_b, 1.0);
-            }
+            let id_a = builder.get_or_create_node(a.as_ref());
+            let id_b = builder.get_or_create_node(b.as_ref());
+            builder.increment_edge(id_a, id_b, weight);
         }
+    }
+
+    builder
+}
+
+/// Build unweighted graph in parallel using HashSet for efficient deduplication
+fn build_unweighted_parallel(sentences: Vec<Vec<&Token>>, window_size: usize) -> GraphBuilder {
+    // Build partial edge sets in parallel - HashSet automatically deduplicates
+    let partial_sets: Vec<FxHashSet<(Arc<str>, Arc<str>)>> = sentences
+        .par_iter()
+        .map(|sent_tokens| {
+            // Convert lemmas to Arc<str> once per sentence
+            let lemma_arcs: Vec<Arc<str>> = sent_tokens
+                .iter()
+                .map(|t| Arc::from(t.lemma.as_str()))
+                .collect();
+
+            let mut edge_set = FxHashSet::default();
+            for i in 0..sent_tokens.len() {
+                for j in (i + 1)..std::cmp::min(i + window_size, sent_tokens.len()) {
+                    let arc_a = &lemma_arcs[i];
+                    let arc_b = &lemma_arcs[j];
+
+                    if arc_a != arc_b {
+                        let edge = if arc_a <= arc_b {
+                            (Arc::clone(arc_a), Arc::clone(arc_b))
+                        } else {
+                            (Arc::clone(arc_b), Arc::clone(arc_a))
+                        };
+                        edge_set.insert(edge);
+                    }
+                }
+            }
+            edge_set
+        })
+        .collect();
+
+    // Merge all edge sets - extend automatically handles deduplication
+    let mut merged_edges = FxHashSet::default();
+    for partial_set in partial_sets {
+        merged_edges.extend(partial_set);
+    }
+
+    // Build final graph from unique edges
+    let mut builder = GraphBuilder::new();
+    for (a, b) in merged_edges {
+        let id_a = builder.get_or_create_node(a.as_ref());
+        let id_b = builder.get_or_create_node(b.as_ref());
+        builder.set_edge(id_a, id_b, 1.0);
     }
 
     builder

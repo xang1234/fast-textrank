@@ -4,6 +4,7 @@
 //! PageRank needs during power iteration.
 
 use super::builder::GraphBuilder;
+use rustc_hash::FxHashMap;
 
 /// A graph in Compressed Sparse Row format
 ///
@@ -25,6 +26,8 @@ pub struct CsrGraph {
     pub total_weight: Vec<f64>,
     /// Lemmas for each node
     pub lemmas: Vec<String>,
+    /// Fast lemma → node_id lookup (O(1) instead of O(N) linear search)
+    pub lemma_to_id: FxHashMap<String, u32>,
 }
 
 impl CsrGraph {
@@ -37,10 +40,12 @@ impl CsrGraph {
         let mut out_degree = Vec::with_capacity(num_nodes);
         let mut total_weight = Vec::with_capacity(num_nodes);
         let mut lemmas = Vec::with_capacity(num_nodes);
+        let mut lemma_to_id = FxHashMap::with_capacity_and_hasher(num_nodes, Default::default());
 
         row_ptr.push(0);
 
-        for (_, node) in builder.nodes() {
+        for (node_id, node) in builder.nodes() {
+            lemma_to_id.insert(node.lemma.clone(), node_id);
             lemmas.push(node.lemma.clone());
 
             // Collect and sort edges for deterministic iteration
@@ -66,6 +71,7 @@ impl CsrGraph {
             out_degree,
             total_weight,
             lemmas,
+            lemma_to_id,
         }
     }
 
@@ -108,9 +114,9 @@ impl CsrGraph {
             .collect()
     }
 
-    /// Get node ID by lemma (linear search - use sparingly)
+    /// Get node ID by lemma (O(1) HashMap lookup)
     pub fn get_node_by_lemma(&self, lemma: &str) -> Option<u32> {
-        self.lemmas.iter().position(|l| l == lemma).map(|i| i as u32)
+        self.lemma_to_id.get(lemma).copied()
     }
 }
 
@@ -124,6 +130,7 @@ impl Default for CsrGraph {
             out_degree: Vec::new(),
             total_weight: Vec::new(),
             lemmas: Vec::new(),
+            lemma_to_id: FxHashMap::default(),
         }
     }
 }

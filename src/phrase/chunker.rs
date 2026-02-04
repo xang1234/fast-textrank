@@ -178,9 +178,8 @@ impl NounChunker {
 
 /// Extract the text for a chunk span from the original tokens
 pub fn chunk_text(tokens: &[Token], chunk: &ChunkSpan) -> String {
-    tokens
+    tokens[chunk.start_token..chunk.end_token]
         .iter()
-        .filter(|t| t.token_idx >= chunk.start_token && t.token_idx < chunk.end_token)
         .map(|t| t.text.as_str())
         .collect::<Vec<_>>()
         .join(" ")
@@ -188,9 +187,8 @@ pub fn chunk_text(tokens: &[Token], chunk: &ChunkSpan) -> String {
 
 /// Extract the lemmatized text for a chunk span
 pub fn chunk_lemma(tokens: &[Token], chunk: &ChunkSpan) -> String {
-    tokens
+    tokens[chunk.start_token..chunk.end_token]
         .iter()
-        .filter(|t| t.token_idx >= chunk.start_token && t.token_idx < chunk.end_token)
         .map(|t| t.lemma.as_str())
         .collect::<Vec<_>>()
         .join(" ")
