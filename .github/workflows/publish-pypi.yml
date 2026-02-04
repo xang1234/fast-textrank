@@ -25,7 +25,15 @@ jobs:
         with:
           python-version: ${{ matrix.python }}
 
-      - name: Build wheels
+      - name: Build wheels (Linux)
+        if: matrix.os == 'ubuntu-latest'
+        uses: PyO3/maturin-action@v1
+        with:
+          args: --release --out dist -i python${{ matrix.python }}
+          manylinux: auto
+
+      - name: Build wheels (macOS/Windows)
+        if: matrix.os != 'ubuntu-latest'
         uses: PyO3/maturin-action@v1
         with:
           args: --release --out dist --interpreter python
