@@ -485,6 +485,32 @@ pytest
 cargo test
 ```
 
+## Publishing
+
+Publishing is automated with GitHub Actions using Trusted Publishing (OIDC), so no API tokens are stored.
+
+TestPyPI release (push a tag):
+
+```bash
+git tag -a test-0.1.0 -m "TestPyPI 0.1.0"
+git push origin test-0.1.0
+```
+
+PyPI release (push a tag):
+
+```bash
+git tag -a v0.1.0 -m "Release 0.1.0"
+git push origin v0.1.0
+```
+
+Before the first publish, add Trusted Publishers on TestPyPI and PyPI:
+
+- Repo: `xang1234/textranker`
+- Workflows: `.github/workflows/publish-testpypi.yml` and `.github/workflows/publish-pypi.yml`
+- Environments: `testpypi` and `pypi`
+
+You can also trigger either workflow manually via GitHub Actions if needed.
+
 ## License
 
 MIT License - see [LICENSE](LICENSE) for details.
