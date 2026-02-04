@@ -713,4 +713,64 @@ mod tests {
             "Expected accumulated weight = 500.0 (parallel merge should accumulate with use_weights=true)"
         );
     }
+
+    #[test]
+    fn test_parallel_weighted_uses_arc_str() {
+        // This test verifies the parallel weighted path uses Arc<str> for edge keys
+        // by exercising the code path and checking functional correctness.
+        // The Arc<str> usage is enforced at compile time via type annotations in
+        // build_graph_parallel_with_pos (line 310: FxHashMap<(Arc<str>, Arc<str>), f64>)
+
+        // Build enough tokens to trigger parallel path (>1000)
+        let mut tokens = Vec::with_capacity(1200);
+        for sent_idx in 0..400 {
+            tokens.push(Token {
+                text: "alpha".to_string(),
+                lemma: "alpha".to_string(),
+                pos: PosTag::Noun,
+                start: 0,
+                end: 5,
+                sentence_idx: sent_idx,
+                token_idx: sent_idx * 3,
+                is_stopword: false,
+            });
+            tokens.push(Token {
+                text: "beta".to_string(),
+                lemma: "beta".to_string(),
+                pos: PosTag::Noun,
+                start: 6,
+                end: 10,
+                sentence_idx: sent_idx,
+                token_idx: sent_idx * 3 + 1,
+                is_stopword: false,
+            });
+            tokens.push(Token {
+                text: "gamma".to_string(),
+                lemma: "gamma".to_string(),
+                pos: PosTag::Noun,
+                start: 11,
+                end: 16,
+                sentence_idx: sent_idx,
+                token_idx: sent_idx * 3 + 2,
+                is_stopword: false,
+            });
+        }
+
+        // With use_weights=true, parallel path uses Arc<str> in FxHashMap keys
+        let builder = build_graph_parallel_with_pos(&tokens, 2, true, None);
+
+        // Verify graph structure
+        assert_eq!(builder.node_count(), 3, "Should have 3 unique lemmas");
+
+        let alpha_id = builder.get_node_id("alpha").expect("alpha should exist");
+        let beta_id = builder.get_node_id("beta").expect("beta should exist");
+
+        // Each sentence has alpha-beta edge, 400 sentences = weight 400
+        let weight = builder.get_node(alpha_id).unwrap().edges.get(&beta_id);
+        assert_eq!(
+            *weight.unwrap(),
+            400.0,
+            "Arc<str> parallel path should correctly accumulate weights"
+        );
+    }
 }
