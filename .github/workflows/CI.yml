@@ -67,11 +67,32 @@ jobs:
       - name: Set up Rust
         run: rustup default stable
 
-      - name: Install maturin
-        run: pip install maturin[patchelf]
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: ${{ runner.os }}-cargo-python-${{ matrix.python }}-${{ hashFiles('**/Cargo.lock') }}
 
-      - name: Build and install
-        run: maturin develop --release
+      - name: Install maturin
+        run: python -m pip install maturin
+
+      - name: Build wheel
+        run: maturin build --release -i python --out dist
+
+      - name: Install wheel (Linux/macOS)
+        if: matrix.os != 'windows-latest'
+        run: python -m pip install dist/*.whl
+
+      - name: Install wheel (Windows)
+        if: matrix.os == 'windows-latest'
+        shell: pwsh
+        run: |
+          $wheel = Get-ChildItem dist/*.whl | Select-Object -First 1
+          python -m pip install $wheel.FullName
 
       - name: Install test dependencies
         run: pip install pytest
@@ -89,7 +110,7 @@ jobs:
         run: rustup default stable
 
       - name: Run benchmarks
-        run: cargo bench --all-features -- --noplot
+        run: cargo bench --all-features
 
   build-wheels:
     name: Build wheels (${{ matrix.os }}, Python ${{ matrix.python }})
@@ -105,6 +126,16 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python }}
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: ${{ runner.os }}-cargo-wheels-${{ matrix.python }}-${{ hashFiles('**/Cargo.lock') }}
 
       - name: Build wheels (Linux)
         if: matrix.os == 'ubuntu-latest'
