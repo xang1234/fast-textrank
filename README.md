@@ -6,16 +6,16 @@
 
 **High-performance TextRank implementation in Rust with Python bindings.**
 
-Extract keywords and key phrases from text 10-100x faster than pure Python implementations, with support for multiple algorithm variants and 18 languages.
+Extract keywords and key phrases from text up to 10-100x faster than pure Python implementations (depending on document size and tokenization), with support for multiple algorithm variants and 18 languages.
 
 ## Features
 
-- **Fast**: 10-100x faster than pure Python implementations
+- **Fast**: Up to 10-100x faster than pure Python implementations (see benchmarks)
 - **Multiple algorithms**: TextRank, PositionRank, and BiasedTextRank variants
-- **Unicode-aware**: Proper handling of CJK, emoji, and other scripts
+- **Unicode-aware**: Proper handling of CJK and other scripts (emoji are ignored by the built-in tokenizer)
 - **Multi-language**: Stopword support for 18 languages
 - **Dual API**: Native Python classes + JSON interface for batch processing
-- **Zero Python overhead**: Computation happens entirely in Rust (no GIL)
+- **Rust core**: Computation happens in Rust (the Python GIL is currently held during extraction)
 
 ## Quick Start
 
@@ -56,7 +56,7 @@ TextRank is a graph-based ranking algorithm for keyword extraction, inspired by 
 
 2. **Run PageRank**: The algorithm iteratively distributes "importance" through the graph. Words connected to many important words become important themselves.
 
-3. **Extract phrases**: Adjacent high-scoring words are combined into key phrases. Scores are aggregated (sum, mean, or max).
+3. **Extract phrases**: High-scoring words are grouped into noun chunks (POS-filtered) to form key phrases. Scores are aggregated (sum, mean, or max).
 
 ```
 Text: "Machine learning enables systems to learn from data"
@@ -217,7 +217,7 @@ tuples = result.as_tuples()  # [(text, score), ...]
 
 ### JSON Interface
 
-For processing large documents or integrating with spaCy, use the JSON interface. This accepts pre-tokenized data to avoid re-tokenizing in Rust.
+For processing large documents or integrating with spaCy, use the JSON interface. This accepts pre-tokenized data to avoid re-tokenizing in Rust. Stopword filtering relies on each token's `is_stopword` field (the JSON config does not include `language`).
 
 ```python
 from rapid_textrank import extract_from_json, extract_batch_from_json
@@ -244,7 +244,7 @@ doc = {
 result_json = extract_from_json(json.dumps(doc))
 result = json.loads(result_json)
 
-# Batch processing (parallel in Rust)
+# Batch processing (Rust core; per-document processing is sequential)
 docs = [doc1, doc2, doc3]
 results_json = extract_batch_from_json(json.dumps(docs))
 results = json.loads(results_json)
@@ -439,11 +439,11 @@ The performance advantage comes from several factors:
 
 2. **String Interning**: Repeated words share a single allocation via `StringPool`, reducing memory usage 10-100x for typical documents.
 
-3. **Parallel Processing**: Rayon provides data parallelism for batch processing without explicit thread management.
+3. **Parallel Processing**: Rayon provides data parallelism in internal graph construction without explicit thread management.
 
 4. **Link-Time Optimization (LTO)**: Release builds use full LTO with single codegen unit for maximum inlining.
 
-5. **No GIL**: All computation happens in Rust. Python's Global Interpreter Lock is released during extraction.
+5. **Rust core**: Most computation happens in Rust, minimizing Python-level overhead.
 
 6. **FxHash**: Fast non-cryptographic hashing for internal hash maps.
 
@@ -463,12 +463,24 @@ Import name is `rapid_textrank`.
 pip install rapid_textrank[spacy]
 ```
 
+```python
+import spacy
+import rapid_textrank.spacy_component  # registers the pipeline factory
+
+nlp = spacy.load("en_core_web_sm")
+nlp.add_pipe("rapid_textrank")
+
+doc = nlp("Machine learning is a subset of artificial intelligence.")
+for phrase in doc._.phrases[:5]:
+    print(f"{phrase.text}: {phrase.score:.4f}")
+```
+
 ### From Source
 
 Requirements: Rust 1.70+, Python 3.9+
 
 ```bash
-git clone https://github.com/textranker/rapid_textrank
+git clone https://github.com/xang1234/rapid-textrank
 cd rapid_textrank
 pip install maturin
 maturin develop --release
