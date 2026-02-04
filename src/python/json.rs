@@ -49,7 +49,7 @@ pub struct JsonDocument {
 }
 
 /// Configuration from JSON
-#[derive(Debug, Clone, Deserialize, Default)]
+#[derive(Debug, Clone, Deserialize)]
 pub struct JsonConfig {
     #[serde(default = "default_damping")]
     pub damping: f64,
@@ -98,6 +98,23 @@ fn default_min_length() -> usize {
 }
 fn default_max_length() -> usize {
     4
+}
+
+impl Default for JsonConfig {
+    fn default() -> Self {
+        Self {
+            damping: default_damping(),
+            max_iterations: default_max_iterations(),
+            convergence_threshold: default_threshold(),
+            window_size: default_window(),
+            top_n: default_top_n(),
+            min_phrase_length: default_min_length(),
+            max_phrase_length: default_max_length(),
+            score_aggregation: String::new(),
+            use_edge_weights: default_use_edge_weights(),
+            include_pos: Vec::new(),
+        }
+    }
 }
 
 impl From<JsonConfig> for TextRankConfig {

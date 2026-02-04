@@ -19,7 +19,6 @@ proptest! {
         }
 
         // Add random edges
-        let mut rng = rand::thread_rng();
         for i in 0..nodes {
             for j in (i+1)..nodes {
                 if rand::random::<f64>() < edge_prob {
@@ -46,7 +45,7 @@ proptest! {
 
     #[test]
     fn test_phrase_extraction_deterministic(
-        seed in 0u64..1000
+        _seed in 0u64..1000
     ) {
         let text = "Machine learning is a field of artificial intelligence. \
                    Deep learning is a subset of machine learning.";

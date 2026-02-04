@@ -167,7 +167,7 @@ fn test_unicode_text() {
     let unicode_text = "机器学习是人工智能的一个子集。深度学习使用神经网络。";
 
     let tokenizer = nlp::tokenizer::Tokenizer::new();
-    let (sentences, tokens) = tokenizer.tokenize(unicode_text);
+    let (sentences, _tokens) = tokenizer.tokenize(unicode_text);
 
     assert!(!sentences.is_empty());
     // Should handle CJK characters
