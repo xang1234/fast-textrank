@@ -1,6 +1,6 @@
 //! Python bindings via PyO3
 //!
-//! This module provides the Python interface for rust_textrank.
+//! This module provides the Python interface for fast_textrank.
 
 pub mod json;
 pub mod native;

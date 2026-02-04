@@ -1,4 +1,4 @@
-//! # rust_textrank
+//! # fast_textrank
 //!
 //! A high-performance TextRank implementation with Python bindings.
 //!
