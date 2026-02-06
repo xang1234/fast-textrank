@@ -11,7 +11,7 @@ Extract keywords and key phrases from text up to 10-100x faster than pure Python
 ## Features
 
 - **Fast**: Up to 10-100x faster than pure Python implementations (see benchmarks)
-- **Multiple algorithms**: TextRank, PositionRank, and BiasedTextRank variants
+- **Multiple algorithms**: TextRank, PositionRank, BiasedTextRank, and TopicRank variants
 - **Unicode-aware**: Proper handling of CJK and other scripts (emoji are ignored by the built-in tokenizer)
 - **Multi-language**: Stopword support for 18 languages
 - **Dual API**: Native Python classes + JSON interface for batch processing
@@ -78,6 +78,7 @@ Co-occurrence graph (window=2):
 - [TextRank: Bringing Order into Texts](https://aclanthology.org/W04-3252/) (Mihalcea & Tarau, 2004)
 - [PositionRank: An Unsupervised Approach to Keyphrase Extraction](https://aclanthology.org/P17-1102/) (Florescu & Caragea, 2017)
 - [BiasedTextRank: Unsupervised Graph-Based Content Extraction](https://aclanthology.org/2020.coling-main.144/) (Kazemi et al., 2020)
+- [TopicRank: Graph-Based Topic Ranking for Keyphrase Extraction](https://aclanthology.org/I13-1062/) (Bougouin et al., 2013)
 
 ## Algorithm Variants
 
@@ -86,6 +87,7 @@ Co-occurrence graph (window=2):
 | `BaseTextRank` | General text | Standard TextRank implementation |
 | `PositionRank` | Academic papers, news | Favors words appearing early in the document |
 | `BiasedTextRank` | Topic-focused extraction | Biases results toward specified focus terms |
+| `TopicRank` | Multi-topic documents | Clusters similar phrases into topics and ranks the topics |
 
 ### PositionRank
 
@@ -125,6 +127,48 @@ optimizations should not compromise security measures.
 """)
 
 # Results will favor security/privacy-related phrases
+```
+
+### TopicRank
+
+TopicRank clusters similar candidate phrases into topics, then ranks the topics. It is exposed via the JSON interface (useful for spaCy-tokenized input).
+
+```python
+import json
+import spacy
+from rapid_textrank import extract_from_json
+
+nlp = spacy.load("en_core_web_sm")
+doc = nlp(text)
+
+tokens = []
+for sent_idx, sent in enumerate(doc.sents):
+    for token in sent:
+        tokens.append({
+            "text": token.text,
+            "lemma": token.lemma_,
+            "pos": token.pos_,
+            "start": token.idx,
+            "end": token.idx + len(token.text),
+            "sentence_idx": sent_idx,
+            "token_idx": token.i,
+            "is_stopword": token.is_stop,
+        })
+
+payload = {
+    "tokens": tokens,
+    "variant": "topic_rank",
+    "config": {
+        "top_n": 10,
+        "language": "en",
+        "topic_similarity_threshold": 0.25,
+        "topic_edge_weight": 1.0,
+    },
+}
+
+result = json.loads(extract_from_json(json.dumps(payload)))
+for phrase in result["phrases"][:10]:
+    print(phrase["text"], phrase["score"])
 ```
 
 ## API Reference
@@ -170,6 +214,8 @@ result = extractor.extract_keywords(text)
 # You can also pass focus_terms per-call
 result = extractor.extract_keywords(text, focus_terms=["neural", "network"])
 ```
+
+TopicRank is available via the JSON interface using `variant="topic_rank"` (see below).
 
 ### Configuration
 
@@ -242,7 +288,12 @@ doc = {
         },
         # ... more tokens
     ],
-    "config": {"top_n": 10, "language": "en", "stopwords": ["nlp", "transformers"]}
+    "variant": "textrank",
+    "config": {
+        "top_n": 10,
+        "language": "en",
+        "stopwords": ["nlp", "transformers"]
+    }
 }
 
 result_json = extract_from_json(json.dumps(doc))
@@ -253,6 +304,8 @@ docs = [doc1, doc2, doc3]
 results_json = extract_batch_from_json(json.dumps(docs))
 results = json.loads(results_json)
 ```
+
+`variant` can be `"textrank"` (default), `"position_rank"`, `"biased_textrank"`, or `"topic_rank"`. For `"biased_textrank"`, set `focus_terms` and `bias_weight` in the JSON config. For `"topic_rank"`, set `topic_similarity_threshold` and `topic_edge_weight` in the JSON config.
 
 ## Supported Languages
 
@@ -570,5 +623,18 @@ For PositionRank:
     author = "Florescu, Corina and Caragea, Cornelia",
     booktitle = "Proceedings of ACL 2017",
     year = "2017",
+}
+```
+
+For TopicRank:
+
+```bibtex
+@inproceedings{bougouin-boudin-daille-2013-topicrank,
+    title = "{T}opic{R}ank: Graph-Based Topic Ranking for Keyphrase Extraction",
+    author = "Bougouin, Adrien and Boudin, Florian and Daille, B{\\'e}atrice",
+    booktitle = "Proceedings of the Sixth International Joint Conference on Natural Language Processing",
+    year = "2013",
+    pages = "543--551",
+    publisher = "Asian Federation of Natural Language Processing",
 }
 ```

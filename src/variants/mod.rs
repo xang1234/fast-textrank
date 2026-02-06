@@ -20,6 +20,7 @@ pub enum Variant {
 impl Variant {
     fn parse(value: &str) -> Self {
         match value.to_lowercase().as_str() {
+            "textrank" | "text_rank" | "base" => Variant::TextRank,
             "position_rank" | "positionrank" | "position" => Variant::PositionRank,
             "biased_textrank" | "biased" | "biasedtextrank" => Variant::BiasedTextRank,
             "topic_rank" | "topicrank" | "topic" => Variant::TopicRank,

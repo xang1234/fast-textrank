@@ -3,10 +3,7 @@
 //! For large documents or batch processing, the JSON interface
 //! minimizes Python↔Rust overhead by passing pre-tokenized data.
 
-use crate::graph::builder::GraphBuilder;
-use crate::graph::csr::CsrGraph;
-use crate::pagerank::standard::StandardPageRank;
-use crate::phrase::extraction::{extract_keyphrases_with_info, PhraseExtractor};
+use crate::phrase::extraction::extract_keyphrases_with_info;
 use crate::types::{PhraseGrouping, PosTag, ScoreAggregation, TextRankConfig, Token};
 use crate::variants::biased_textrank::BiasedTextRank;
 use crate::variants::position_rank::PositionRank;
@@ -209,6 +206,32 @@ impl From<JsonConfig> for TextRankConfig {
     }
 }
 
+fn extract_with_variant(
+    tokens: &[Token],
+    config: &TextRankConfig,
+    json_config: &JsonConfig,
+    variant: Variant,
+) -> crate::phrase::extraction::ExtractionResult {
+    match variant {
+        Variant::TextRank => extract_keyphrases_with_info(tokens, config),
+        Variant::PositionRank => PositionRank::with_config(config.clone()).extract_with_info(tokens),
+        Variant::BiasedTextRank => BiasedTextRank::with_config(config.clone())
+            .with_focus(
+                &json_config
+                    .focus_terms
+                    .iter()
+                    .map(|s| s.as_str())
+                    .collect::<Vec<_>>(),
+            )
+            .with_bias_weight(json_config.bias_weight)
+            .extract_with_info(tokens),
+        Variant::TopicRank => TopicRank::with_config(config.clone())
+            .with_similarity_threshold(json_config.topic_similarity_threshold)
+            .with_edge_weight(json_config.topic_edge_weight)
+            .extract_with_info(tokens),
+    }
+}
+
 /// Output phrase for JSON
 #[derive(Debug, Clone, Serialize)]
 pub struct JsonPhrase {
@@ -265,26 +288,7 @@ pub fn extract_from_json(json_input: &str) -> PyResult<String> {
         }
     }
 
-    let extraction = match variant {
-        Variant::TextRank => extract_keyphrases_with_info(&tokens, &config),
-        Variant::PositionRank => {
-            PositionRank::with_config(config.clone()).extract_with_info(&tokens)
-        }
-        Variant::BiasedTextRank => BiasedTextRank::with_config(config.clone())
-            .with_focus(
-                &json_config
-                    .focus_terms
-                    .iter()
-                    .map(|s| s.as_str())
-                    .collect::<Vec<_>>(),
-            )
-            .with_bias_weight(json_config.bias_weight)
-            .extract_with_info(&tokens),
-        Variant::TopicRank => TopicRank::with_config(config.clone())
-            .with_similarity_threshold(json_config.topic_similarity_threshold)
-            .with_edge_weight(json_config.topic_edge_weight)
-            .extract_with_info(&tokens),
-    };
+    let extraction = extract_with_variant(&tokens, &config, &json_config, variant);
 
     // Build result
     let result = JsonResult {
@@ -325,7 +329,13 @@ pub fn extract_batch_from_json(json_input: &str) -> PyResult<String> {
     let results: Vec<JsonResult> = docs
         .into_iter()
         .map(|doc| {
-            let config: TextRankConfig = doc.config.unwrap_or_default().into();
+            let json_config = doc.config.unwrap_or_default();
+            let config: TextRankConfig = json_config.clone().into();
+            let variant = doc
+                .variant
+                .as_deref()
+                .and_then(|value| value.parse().ok())
+                .unwrap_or(Variant::TextRank);
             let mut tokens: Vec<Token> = doc.tokens.into_iter().map(Token::from).collect();
 
             if !config.stopwords.is_empty() {
@@ -340,35 +350,11 @@ pub fn extract_batch_from_json(json_input: &str) -> PyResult<String> {
                 }
             }
 
-            let builder = GraphBuilder::from_tokens_with_pos(
-                &tokens,
-                config.window_size,
-                config.use_edge_weights,
-                Some(&config.include_pos),
-                config.use_pos_in_nodes,
-            );
-
-            if builder.is_empty() {
-                return JsonResult {
-                    phrases: vec![],
-                    converged: true,
-                    iterations: 0,
-                };
-            }
-
-            let graph = CsrGraph::from_builder(&builder);
-
-            let pagerank = StandardPageRank::new()
-                .with_damping(config.damping)
-                .with_max_iterations(config.max_iterations)
-                .with_threshold(config.convergence_threshold)
-                .run(&graph);
-
-            let extractor = PhraseExtractor::with_config(config);
-            let phrases = extractor.extract(&tokens, &graph, &pagerank);
+            let extraction = extract_with_variant(&tokens, &config, &json_config, variant);
 
             JsonResult {
-                phrases: phrases
+                phrases: extraction
+                    .phrases
                     .into_iter()
                     .map(|p| JsonPhrase {
                         text: p.text,
@@ -378,8 +364,8 @@ pub fn extract_batch_from_json(json_input: &str) -> PyResult<String> {
                         rank: p.rank,
                     })
                     .collect(),
-                converged: pagerank.converged,
-                iterations: pagerank.iterations,
+                converged: extraction.converged,
+                iterations: extraction.iterations,
             }
         })
         .collect();
@@ -391,6 +377,7 @@ pub fn extract_batch_from_json(json_input: &str) -> PyResult<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::graph::builder::GraphBuilder;
 
     #[test]
     fn test_json_include_pos_filtering() {
