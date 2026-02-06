@@ -163,14 +163,31 @@ mod tests {
     #[test]
     fn test_first_positions() {
         let tokens = make_tokens();
-        let builder = GraphBuilder::from_tokens(&tokens, 4, true);
+        let config = TextRankConfig::default();
+        let include_pos = if config.include_pos.is_empty() {
+            None
+        } else {
+            Some(config.include_pos.as_slice())
+        };
+        let builder = GraphBuilder::from_tokens_with_pos(
+            &tokens,
+            4,
+            true,
+            include_pos,
+            config.use_pos_in_nodes,
+        );
         let graph = CsrGraph::from_builder(&builder);
 
-        let pr = PositionRank::new();
+        let pr = PositionRank::with_config(config);
         let first_pos = pr.get_first_positions(&tokens, &graph);
 
         // "topic" first appears at position 1
-        let topic_node = graph.get_node_by_lemma("topic");
+        let topic_key = tokens
+            .iter()
+            .find(|t| t.lemma == "topic")
+            .expect("missing topic token")
+            .graph_key(pr.config.use_pos_in_nodes);
+        let topic_node = graph.get_node_by_lemma(&topic_key);
         if let Some(node_id) = topic_node {
             let pos = first_pos.iter().find(|(id, _)| *id == node_id);
             assert!(pos.is_some());
