@@ -17,6 +17,20 @@ def test_import():
     assert hasattr(rapid_textrank, "SingleRank")
 
 
+def test_all_rust_classes_exported():
+    """Every pyclass in _rust must be re-exported from rapid_textrank."""
+    import rapid_textrank._rust as _rust
+    import rapid_textrank
+
+    rust_classes = {
+        name for name, obj in vars(_rust).items()
+        if isinstance(obj, type) and not name.startswith("_")
+    }
+    init_names = set(dir(rapid_textrank))
+    missing = rust_classes - init_names
+    assert not missing, f"Classes in _rust but not in __init__.py: {missing}"
+
+
 def test_version():
     """Test version string is valid."""
     from rapid_textrank import __version__
