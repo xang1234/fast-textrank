@@ -10,7 +10,9 @@ use crate::types::{Phrase, PhraseGrouping, ScoreAggregation, TextRankConfig};
 use crate::variants::biased_textrank::BiasedTextRank;
 use crate::variants::position_rank::PositionRank;
 use crate::variants::single_rank::SingleRank;
+use crate::variants::topical_pagerank::TopicalPageRank;
 use pyo3::prelude::*;
+use std::collections::HashMap;
 
 /// A phrase extracted by TextRank
 #[pyclass(name = "Phrase")]
@@ -483,6 +485,96 @@ impl PySingleRank {
         format!(
             "SingleRank(top_n={}, language='{}')",
             self.config.top_n, self.config.language
+        )
+    }
+}
+
+/// Topical PageRank keyword extractor
+///
+/// Uses topic-importance weights to bias the random walk towards
+/// topically relevant words. Combines SingleRank's weighted graph
+/// with personalized PageRank.
+#[pyclass(name = "TopicalPageRank")]
+pub struct PyTopicalPageRank {
+    config: TextRankConfig,
+    topic_weights: HashMap<String, f64>,
+    min_weight: f64,
+}
+
+#[pymethods]
+impl PyTopicalPageRank {
+    #[new]
+    #[pyo3(signature = (topic_weights=None, min_weight=0.0, config=None, top_n=None, language=None))]
+    fn new(
+        topic_weights: Option<HashMap<String, f64>>,
+        min_weight: f64,
+        config: Option<PyTextRankConfig>,
+        top_n: Option<usize>,
+        language: Option<&str>,
+    ) -> PyResult<Self> {
+        let mut inner_config = config.map(|c| c.inner).unwrap_or_default();
+
+        if let Some(n) = top_n {
+            inner_config.top_n = n;
+        }
+        if let Some(lang) = language {
+            inner_config.language = lang.to_string();
+        }
+
+        Ok(Self {
+            config: inner_config,
+            topic_weights: topic_weights.unwrap_or_default(),
+            min_weight,
+        })
+    }
+
+    /// Set topic weights for extraction
+    fn set_topic_weights(&mut self, weights: HashMap<String, f64>) {
+        self.topic_weights = weights;
+    }
+
+    /// Extract keywords using Topical PageRank
+    #[pyo3(signature = (text, topic_weights=None))]
+    fn extract_keywords(
+        &mut self,
+        text: &str,
+        topic_weights: Option<HashMap<String, f64>>,
+    ) -> PyResult<PyTextRankResult> {
+        if let Some(weights) = topic_weights {
+            self.topic_weights = weights;
+        }
+
+        let tokenizer = Tokenizer::new();
+        let (_, mut tokens) = tokenizer.tokenize(text);
+
+        let stopwords = if self.config.stopwords.is_empty() {
+            StopwordFilter::new(&self.config.language)
+        } else {
+            StopwordFilter::with_additional(&self.config.language, &self.config.stopwords)
+        };
+        for token in &mut tokens {
+            token.is_stopword = stopwords.is_stopword(&token.text);
+        }
+
+        let extractor = TopicalPageRank::with_config(self.config.clone())
+            .with_topic_weights(self.topic_weights.clone())
+            .with_min_weight(self.min_weight);
+
+        let result = extractor.extract_with_info(&tokens);
+
+        Ok(PyTextRankResult {
+            phrases: result.phrases.into_iter().map(PyPhrase::from).collect(),
+            converged: result.converged,
+            iterations: result.iterations,
+        })
+    }
+
+    fn __repr__(&self) -> String {
+        format!(
+            "TopicalPageRank(topic_weights={}, min_weight={}, top_n={})",
+            self.topic_weights.len(),
+            self.min_weight,
+            self.config.top_n
         )
     }
 }

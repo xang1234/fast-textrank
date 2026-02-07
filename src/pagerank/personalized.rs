@@ -213,6 +213,58 @@ pub fn focus_based_personalization(
     personalization
 }
 
+/// Create a topic-weight-based personalization vector for Topical PageRank
+///
+/// Each node's teleport probability is proportional to its topic weight.
+/// Words not in `topic_weights` receive `min_weight` (PKE uses 0.0 for OOV).
+///
+/// When `use_pos_in_nodes` is true, the graph keys are `"lemma|POS"`. Each
+/// lemma weight is applied to all POS variants present in the graph.
+///
+/// The returned vector is **not** normalized — `PersonalizedPageRank::run`
+/// normalizes internally.
+pub fn topic_weight_personalization(
+    topic_weights: &std::collections::HashMap<String, f64>,
+    graph: &CsrGraph,
+    include_pos: &[crate::types::PosTag],
+    use_pos_in_nodes: bool,
+    min_weight: f64,
+) -> Vec<f64> {
+    let num_nodes = graph.num_nodes;
+    let mut personalization = vec![min_weight; num_nodes];
+
+    if use_pos_in_nodes {
+        let default_pos = [
+            crate::types::PosTag::Noun,
+            crate::types::PosTag::Adjective,
+            crate::types::PosTag::ProperNoun,
+            crate::types::PosTag::Verb,
+        ];
+        let pos_tags: &[crate::types::PosTag] = if include_pos.is_empty() {
+            &default_pos
+        } else {
+            include_pos
+        };
+
+        for (lemma, &weight) in topic_weights {
+            for pos in pos_tags {
+                let key = format!("{}|{}", lemma, pos.as_str());
+                if let Some(node_id) = graph.get_node_by_lemma(&key) {
+                    personalization[node_id as usize] = weight;
+                }
+            }
+        }
+    } else {
+        for (lemma, &weight) in topic_weights {
+            if let Some(node_id) = graph.get_node_by_lemma(lemma) {
+                personalization[node_id as usize] = weight;
+            }
+        }
+    }
+
+    personalization
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -314,5 +366,98 @@ mod tests {
 
         let sum: f64 = result.scores.iter().sum();
         assert!((sum - 1.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn test_topic_weight_personalization_no_pos() {
+        // Graph: a -- b -- c (lemma-only nodes)
+        let graph = build_line_graph();
+
+        let mut weights = std::collections::HashMap::new();
+        weights.insert("a".to_string(), 0.8);
+        weights.insert("c".to_string(), 0.3);
+        // "b" not in weights → gets min_weight
+
+        let p = topic_weight_personalization(&weights, &graph, &[], false, 0.0);
+
+        assert!((p[0] - 0.8).abs() < 1e-10); // a
+        assert!((p[1] - 0.0).abs() < 1e-10); // b (min_weight)
+        assert!((p[2] - 0.3).abs() < 1e-10); // c
+    }
+
+    #[test]
+    fn test_topic_weight_personalization_with_pos() {
+        // Build graph with POS-tagged nodes: "machine|NOUN", "learn|VERB"
+        let mut builder = GraphBuilder::new();
+        let m = builder.get_or_create_node("machine|NOUN");
+        let l = builder.get_or_create_node("learn|VERB");
+        builder.increment_edge(m, l, 1.0);
+        let graph = CsrGraph::from_builder(&builder);
+
+        let mut weights = std::collections::HashMap::new();
+        weights.insert("machine".to_string(), 0.9);
+        // "learn" not in weights
+
+        let p = topic_weight_personalization(
+            &weights,
+            &graph,
+            &[crate::types::PosTag::Noun, crate::types::PosTag::Verb],
+            true,
+            0.1,
+        );
+
+        // "machine|NOUN" should get 0.9
+        let machine_id = graph.get_node_by_lemma("machine|NOUN").unwrap();
+        assert!((p[machine_id as usize] - 0.9).abs() < 1e-10);
+
+        // "learn|VERB" should get min_weight (0.1)
+        let learn_id = graph.get_node_by_lemma("learn|VERB").unwrap();
+        assert!((p[learn_id as usize] - 0.1).abs() < 1e-10);
+    }
+
+    #[test]
+    fn test_topic_weight_personalization_empty_weights() {
+        let graph = build_line_graph();
+        let weights = std::collections::HashMap::new();
+
+        let p = topic_weight_personalization(&weights, &graph, &[], false, 0.5);
+
+        // All nodes get min_weight
+        for &v in &p {
+            assert!((v - 0.5).abs() < 1e-10);
+        }
+    }
+
+    #[test]
+    fn test_topic_weight_personalization_oov() {
+        let graph = build_line_graph();
+
+        let mut weights = std::collections::HashMap::new();
+        weights.insert("nonexistent".to_string(), 1.0);
+
+        let p = topic_weight_personalization(&weights, &graph, &[], false, 0.0);
+
+        // All nodes get min_weight since "nonexistent" isn't in the graph
+        for &v in &p {
+            assert!((v - 0.0).abs() < 1e-10);
+        }
+    }
+
+    #[test]
+    fn test_topic_weight_biases_pagerank() {
+        let graph = build_line_graph(); // a -- b -- c
+
+        // Bias heavily towards "c"
+        let mut weights = std::collections::HashMap::new();
+        weights.insert("c".to_string(), 10.0);
+
+        let p = topic_weight_personalization(&weights, &graph, &[], false, 0.0);
+        let result = PersonalizedPageRank::new()
+            .with_personalization(p)
+            .run(&graph);
+
+        // "c" should have higher score than without bias
+        let uniform_result = PersonalizedPageRank::new().run(&graph);
+        assert!(result.scores[2] > uniform_result.scores[2]);
     }
 }

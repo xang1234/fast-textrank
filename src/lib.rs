@@ -40,6 +40,7 @@ pub use phrase::extraction::PhraseExtractor;
 pub use summarizer::selector::SentenceSelector;
 pub use variants::{
     biased_textrank::BiasedTextRank, position_rank::PositionRank, single_rank::SingleRank,
+    topical_pagerank::TopicalPageRank,
 };
 
 /// Library version

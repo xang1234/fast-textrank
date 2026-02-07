@@ -20,6 +20,7 @@ pub fn register_module(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<native::PyPositionRank>()?;
     m.add_class::<native::PyBiasedTextRank>()?;
     m.add_class::<native::PySingleRank>()?;
+    m.add_class::<native::PyTopicalPageRank>()?;
     m.add_function(wrap_pyfunction!(native::get_stopwords, m)?)?;
 
     // JSON interface functions

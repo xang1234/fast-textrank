@@ -9,9 +9,11 @@ use crate::variants::biased_textrank::BiasedTextRank;
 use crate::variants::position_rank::PositionRank;
 use crate::variants::single_rank::SingleRank;
 use crate::variants::topic_rank::TopicRank;
+use crate::variants::topical_pagerank::TopicalPageRank;
 use crate::variants::Variant;
 use pyo3::prelude::*;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 
 /// Input token from JSON
 #[derive(Debug, Clone, Deserialize)]
@@ -93,6 +95,12 @@ pub struct JsonConfig {
     pub topic_similarity_threshold: f64,
     #[serde(default = "default_topic_edge_weight")]
     pub topic_edge_weight: f64,
+    /// Topic weights for Topical PageRank: {"lemma": weight, ...}
+    #[serde(default)]
+    pub topic_weights: HashMap<String, f64>,
+    /// Minimum weight for OOV words in Topical PageRank (default 0.0)
+    #[serde(default)]
+    pub topic_min_weight: f64,
 }
 
 fn default_use_edge_weights() -> bool {
@@ -160,6 +168,8 @@ impl Default for JsonConfig {
             bias_weight: default_bias_weight(),
             topic_similarity_threshold: default_topic_similarity_threshold(),
             topic_edge_weight: default_topic_edge_weight(),
+            topic_weights: HashMap::new(),
+            topic_min_weight: 0.0,
         }
     }
 }
@@ -231,6 +241,10 @@ fn extract_with_variant(
             .with_edge_weight(json_config.topic_edge_weight)
             .extract_with_info(tokens),
         Variant::SingleRank => SingleRank::with_config(config.clone()).extract_with_info(tokens),
+        Variant::TopicalPageRank => TopicalPageRank::with_config(config.clone())
+            .with_topic_weights(json_config.topic_weights.clone())
+            .with_min_weight(json_config.topic_min_weight)
+            .extract_with_info(tokens),
     }
 }
 

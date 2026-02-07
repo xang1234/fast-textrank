@@ -5,11 +5,13 @@
 //! - BiasedTextRank: Allows focusing on specific topic words
 //! - TopicRank: Clusters similar phrases before ranking
 //! - SingleRank: TextRank with forced weighted edges and cross-sentence windowing
+//! - TopicalPageRank: SingleRank graph + topic-weight-biased personalized PageRank
 
 pub mod biased_textrank;
 pub mod position_rank;
 pub mod single_rank;
 pub mod topic_rank;
+pub mod topical_pagerank;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Variant {
@@ -18,6 +20,7 @@ pub enum Variant {
     BiasedTextRank,
     TopicRank,
     SingleRank,
+    TopicalPageRank,
 }
 
 impl Variant {
@@ -28,6 +31,9 @@ impl Variant {
             "biased_textrank" | "biased" | "biasedtextrank" => Variant::BiasedTextRank,
             "topic_rank" | "topicrank" | "topic" => Variant::TopicRank,
             "single_rank" | "singlerank" | "single" => Variant::SingleRank,
+            "topical_pagerank" | "topicalpagerank" | "single_tpr" | "tpr" => {
+                Variant::TopicalPageRank
+            }
             _ => Variant::TextRank,
         }
     }
