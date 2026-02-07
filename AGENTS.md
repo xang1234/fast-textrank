@@ -38,5 +38,45 @@ bd sync               # Sync with git
 - NEVER say "ready to push when you are" - YOU must push
 - If push fails, resolve and retry until it succeeds
 
-# PY03
-- use PYO3_USE_ABI3_FORWARD_COMPATIBILITY=1 to avoid compatibility issues
+# Build (PyO3 + Python 3.14)
+
+This project uses PyO3 to bind Rust to Python. The local `.venv` runs Python 3.14.
+
+## Required environment variable
+
+**Always** prefix cargo and maturin commands with:
+
+```bash
+PYO3_USE_ABI3_FORWARD_COMPATIBILITY=1
+```
+
+Without it, PyO3 rejects Python 3.14 with a cryptic ABI version error.
+
+## Running tests — use `cargo test --lib`
+
+```bash
+PYO3_USE_ABI3_FORWARD_COMPATIBILITY=1 cargo test --lib
+```
+
+**Do NOT run bare `cargo test`** — it tries to link integration/benchmark test binaries as a Python dylib and fails with hundreds of undefined `_Py*` symbol errors. The `--lib` flag restricts to unit tests inside `src/` and avoids the dylib link.
+
+To filter to a specific module:
+
+```bash
+PYO3_USE_ABI3_FORWARD_COMPATIBILITY=1 cargo test --lib module_name
+```
+
+## Known test failures (ignore these)
+
+Two tests in `python::json::tests` always fail:
+- `test_json_include_pos_filtering`
+- `test_json_include_pos_multiple_tags`
+
+These are pre-existing bugs in the POS-filtering test setup, not caused by your changes. A full `cargo test --lib` run shows `N passed; 2 failed` — the 2 failures are expected.
+
+## Building the Python wheel
+
+```bash
+source .venv/bin/activate
+PYO3_USE_ABI3_FORWARD_COMPATIBILITY=1 maturin develop --release
+```
