@@ -185,7 +185,9 @@ mod tests {
         // should appear among the top phrases.
         let top_lemmas: Vec<&str> = result.phrases.iter().map(|p| p.lemma.as_str()).collect();
         assert!(
-            top_lemmas.iter().any(|l| l.contains("data") || l.contains("science")),
+            top_lemmas
+                .iter()
+                .any(|l| l.contains("data") || l.contains("science")),
             "Expected 'data' or 'science' in top phrases, got: {:?}",
             top_lemmas
         );

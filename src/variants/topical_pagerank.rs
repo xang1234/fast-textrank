@@ -80,7 +80,7 @@ impl TopicalPageRank {
         let builder = GraphBuilder::from_tokens_with_pos_and_boundaries(
             tokens,
             self.config.window_size,
-            true,  // always weighted co-occurrence counts
+            true, // always weighted co-occurrence counts
             include_pos,
             self.config.use_pos_in_nodes,
             false, // ignore sentence boundaries
@@ -325,8 +325,7 @@ mod tests {
         weights.insert("neural".to_string(), 0.5);
 
         let config = TextRankConfig::default().with_top_n(10);
-        let tpr = TopicalPageRank::with_config(config)
-            .with_topic_weights(weights);
+        let tpr = TopicalPageRank::with_config(config).with_topic_weights(weights);
 
         let result_a = tpr.extract_with_info(&tokens);
         let result_b = tpr.extract_with_info(&tokens);
@@ -352,14 +351,21 @@ mod tests {
 
         assert!(!result.phrases.is_empty());
         for phrase in &result.phrases {
-            assert!(phrase.score > 0.0, "score must be positive: {}", phrase.lemma);
+            assert!(
+                phrase.score > 0.0,
+                "score must be positive: {}",
+                phrase.lemma
+            );
         }
         // Phrases should be sorted by descending score
         for pair in result.phrases.windows(2) {
             assert!(
                 pair[0].score >= pair[1].score,
                 "phrases not sorted: {} ({}) >= {} ({})",
-                pair[0].lemma, pair[0].score, pair[1].lemma, pair[1].score
+                pair[0].lemma,
+                pair[0].score,
+                pair[1].lemma,
+                pair[1].score
             );
         }
     }
@@ -371,19 +377,13 @@ mod tests {
         let tokens = sample_tokens();
         let config = TextRankConfig::default().with_top_n(10);
 
-        let small: HashMap<String, f64> = [
-            ("machine", 0.1),
-            ("learning", 0.2),
-            ("neural", 0.3),
-        ]
-        .iter()
-        .map(|(k, v)| (k.to_string(), *v))
-        .collect();
-
-        let large: HashMap<String, f64> = small
+        let small: HashMap<String, f64> = [("machine", 0.1), ("learning", 0.2), ("neural", 0.3)]
             .iter()
-            .map(|(k, v)| (k.clone(), v * 1000.0))
+            .map(|(k, v)| (k.to_string(), *v))
             .collect();
+
+        let large: HashMap<String, f64> =
+            small.iter().map(|(k, v)| (k.clone(), v * 1000.0)).collect();
 
         let result_small = TopicalPageRank::with_config(config.clone())
             .with_topic_weights(small)
@@ -403,7 +403,9 @@ mod tests {
             assert!(
                 (s.score - l.score).abs() < 1e-6,
                 "scores differ for '{}': {} vs {}",
-                s.lemma, s.score, l.score
+                s.lemma,
+                s.score,
+                l.score
             );
         }
     }
@@ -498,9 +500,15 @@ mod tests {
         assert!(result_no_pos.converged);
 
         // In both modes, biased lemmas should appear in the results
-        let pos_lemmas: Vec<&str> = result_pos.phrases.iter().map(|p| p.lemma.as_str()).collect();
+        let pos_lemmas: Vec<&str> = result_pos
+            .phrases
+            .iter()
+            .map(|p| p.lemma.as_str())
+            .collect();
         assert!(
-            pos_lemmas.iter().any(|l| l.contains("deep") || l.contains("network")),
+            pos_lemmas
+                .iter()
+                .any(|l| l.contains("deep") || l.contains("network")),
             "POS mode: expected biased lemmas in results, got: {:?}",
             pos_lemmas
         );

@@ -152,10 +152,7 @@ fn benchmark_phrase_extraction(c: &mut Criterion) {
     });
 
     group.bench_function("single_rank", |b| {
-        b.iter(|| {
-            SingleRank::with_config(config.clone())
-                .extract_with_info(black_box(&tokens))
-        })
+        b.iter(|| SingleRank::with_config(config.clone()).extract_with_info(black_box(&tokens)))
     });
 
     group.bench_function("topical_pagerank", |b| {
@@ -169,8 +166,7 @@ fn benchmark_phrase_extraction(c: &mut Criterion) {
 
     group.bench_function("multipartite_rank", |b| {
         b.iter(|| {
-            MultipartiteRank::with_config(config.clone())
-                .extract_with_info(black_box(&tokens))
+            MultipartiteRank::with_config(config.clone()).extract_with_info(black_box(&tokens))
         })
     });
 
@@ -210,20 +206,27 @@ fn benchmark_full_pipeline(c: &mut Criterion) {
             })
         });
 
-        group.bench_with_input(BenchmarkId::new("biased_textrank", size), &text, |b, text| {
-            b.iter(|| {
-                let tokenizer = nlp::tokenizer::Tokenizer::new();
-                let (_, mut tokens) = tokenizer.tokenize(text);
-                let stopwords = nlp::stopwords::StopwordFilter::new("en");
-                for token in &mut tokens {
-                    token.is_stopword = stopwords.is_stopword(&token.text);
-                }
-                let config = TextRankConfig::default().with_top_n(10);
-                variants::biased_textrank::extract_keyphrases_biased(
-                    &tokens, &config, &["machine", "learning"], 5.0,
-                )
-            })
-        });
+        group.bench_with_input(
+            BenchmarkId::new("biased_textrank", size),
+            &text,
+            |b, text| {
+                b.iter(|| {
+                    let tokenizer = nlp::tokenizer::Tokenizer::new();
+                    let (_, mut tokens) = tokenizer.tokenize(text);
+                    let stopwords = nlp::stopwords::StopwordFilter::new("en");
+                    for token in &mut tokens {
+                        token.is_stopword = stopwords.is_stopword(&token.text);
+                    }
+                    let config = TextRankConfig::default().with_top_n(10);
+                    variants::biased_textrank::extract_keyphrases_biased(
+                        &tokens,
+                        &config,
+                        &["machine", "learning"],
+                        5.0,
+                    )
+                })
+            },
+        );
 
         group.bench_with_input(BenchmarkId::new("single_rank", size), &text, |b, text| {
             b.iter(|| {

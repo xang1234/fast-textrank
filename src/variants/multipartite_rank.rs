@@ -173,7 +173,12 @@ impl MultipartiteRank {
 
                 let mut offsets: Vec<(usize, usize)> = indices
                     .iter()
-                    .map(|&i| (candidates[i].chunk.start_token, candidates[i].chunk.end_token))
+                    .map(|&i| {
+                        (
+                            candidates[i].chunk.start_token,
+                            candidates[i].chunk.end_token,
+                        )
+                    })
                     .collect();
                 offsets.sort_by_key(|(start, _)| *start);
 
@@ -493,7 +498,11 @@ mod tests {
         let tokens = make_tokens();
         let phrases = MultipartiteRank::new().extract(&tokens);
         for (i, phrase) in phrases.iter().enumerate() {
-            assert_eq!(phrase.rank, i + 1, "Rank should be 1-indexed and contiguous");
+            assert_eq!(
+                phrase.rank,
+                i + 1,
+                "Rank should be 1-indexed and contiguous"
+            );
         }
         // Scores should be descending
         for w in phrases.windows(2) {

@@ -128,8 +128,7 @@ fn test_single_rank_pipeline() {
     }
 
     let config = TextRankConfig::default().with_top_n(10);
-    let result =
-        variants::single_rank::SingleRank::with_config(config).extract_with_info(&tokens);
+    let result = variants::single_rank::SingleRank::with_config(config).extract_with_info(&tokens);
 
     assert!(!result.phrases.is_empty());
     assert!(result.converged);
@@ -145,7 +144,9 @@ fn test_single_rank_pipeline() {
     // somewhere in the results (using contains to match lemma variants).
     let all_lemmas: Vec<&str> = result.phrases.iter().map(|p| p.lemma.as_str()).collect();
     assert!(
-        all_lemmas.iter().any(|l| l.contains("learn") || l.contains("data")),
+        all_lemmas
+            .iter()
+            .any(|l| l.contains("learn") || l.contains("data")),
         "Expected 'learn' or 'data' in top phrases, got: {:?}",
         all_lemmas
     );
@@ -328,9 +329,16 @@ fn test_topical_pagerank_pipeline() {
     }
 
     // Biased lemmas should appear in the top results
-    let top_lemmas: Vec<&str> = result.phrases.iter().take(5).map(|p| p.lemma.as_str()).collect();
+    let top_lemmas: Vec<&str> = result
+        .phrases
+        .iter()
+        .take(5)
+        .map(|p| p.lemma.as_str())
+        .collect();
     assert!(
-        top_lemmas.iter().any(|l| l.contains("neural") || l.contains("deep") || l.contains("network")),
+        top_lemmas
+            .iter()
+            .any(|l| l.contains("neural") || l.contains("deep") || l.contains("network")),
         "Expected biased lemmas in top-5 phrases, got: {:?}",
         top_lemmas
     );

@@ -242,7 +242,9 @@ fn extract_with_variant(
 ) -> crate::phrase::extraction::ExtractionResult {
     match variant {
         Variant::TextRank => extract_keyphrases_with_info(tokens, config),
-        Variant::PositionRank => PositionRank::with_config(config.clone()).extract_with_info(tokens),
+        Variant::PositionRank => {
+            PositionRank::with_config(config.clone()).extract_with_info(tokens)
+        }
         Variant::BiasedTextRank => BiasedTextRank::with_config(config.clone())
             .with_focus(
                 &json_config

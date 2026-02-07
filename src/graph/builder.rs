@@ -434,7 +434,13 @@ pub fn build_graph_parallel_with_pos_and_boundaries(
     respect_sentence_boundaries: bool,
 ) -> GraphBuilder {
     if respect_sentence_boundaries {
-        build_graph_parallel_with_pos(tokens, window_size, use_weights, include_pos, use_pos_in_nodes)
+        build_graph_parallel_with_pos(
+            tokens,
+            window_size,
+            use_weights,
+            include_pos,
+            use_pos_in_nodes,
+        )
     } else {
         // Cross-sentence windowing: the window spans the entire document,
         // so sentence-based parallelism doesn't apply. Use the sequential path.
@@ -918,9 +924,8 @@ mod tests {
             make_token("neural", "neural", 1, 3),
         ];
 
-        let builder = GraphBuilder::from_tokens_with_pos_and_boundaries(
-            &tokens, 3, true, None, false, false,
-        );
+        let builder =
+            GraphBuilder::from_tokens_with_pos_and_boundaries(&tokens, 3, true, None, false, false);
 
         let learning_id = builder.get_node_id("learning").unwrap();
         let deep_id = builder.get_node_id("deep").unwrap();
@@ -941,9 +946,8 @@ mod tests {
             make_token("neural", "neural", 1, 3),
         ];
 
-        let builder = GraphBuilder::from_tokens_with_pos_and_boundaries(
-            &tokens, 3, true, None, false, true,
-        );
+        let builder =
+            GraphBuilder::from_tokens_with_pos_and_boundaries(&tokens, 3, true, None, false, true);
 
         let learning_id = builder.get_node_id("learning").unwrap();
         let deep_id = builder.get_node_id("deep").unwrap();
@@ -968,9 +972,8 @@ mod tests {
             make_token("learning", "learning", 2, 5),
         ];
 
-        let builder = GraphBuilder::from_tokens_with_pos_and_boundaries(
-            &tokens, 2, true, None, false, false,
-        );
+        let builder =
+            GraphBuilder::from_tokens_with_pos_and_boundaries(&tokens, 2, true, None, false, false);
 
         let machine_id = builder.get_node_id("machine").unwrap();
         let learning_id = builder.get_node_id("learning").unwrap();
@@ -1026,9 +1029,8 @@ mod tests {
             make_token("neural", "neural", 1, 3),
         ];
 
-        let builder = build_graph_parallel_with_pos_and_boundaries(
-            &tokens, 3, true, None, false, false,
-        );
+        let builder =
+            build_graph_parallel_with_pos_and_boundaries(&tokens, 3, true, None, false, false);
 
         let learning_id = builder.get_node_id("learning").unwrap();
         let deep_id = builder.get_node_id("deep").unwrap();
