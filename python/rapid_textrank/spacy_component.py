@@ -89,6 +89,7 @@ if SPACY_AVAILABLE:
             "phrase_grouping": "scrubbed_text",
             "language": "en",
             "stopwords": None,
+            "variant": "textrank",
         },
     )
     def create_rapid_textrank(
@@ -107,6 +108,7 @@ if SPACY_AVAILABLE:
         phrase_grouping: str,
         language: str,
         stopwords: Optional[List[str]],
+        variant: str,
     ):
         """Create a RustTextRank pipeline component."""
         return RustTextRank(
@@ -125,6 +127,7 @@ if SPACY_AVAILABLE:
             phrase_grouping=phrase_grouping,
             language=language,
             stopwords=stopwords,
+            variant=variant,
         )
 
     class RustTextRank:
@@ -160,9 +163,11 @@ if SPACY_AVAILABLE:
             phrase_grouping: str = "scrubbed_text",
             language: str = "en",
             stopwords: Optional[List[str]] = None,
+            variant: str = "textrank",
         ):
             self.nlp = nlp
             self.name = name
+            self.variant = variant
             self.config = {
                 "damping": damping,
                 "max_iterations": max_iterations,
@@ -207,7 +212,9 @@ if SPACY_AVAILABLE:
                     )
 
             # Create JSON input
-            json_input = json.dumps({"tokens": tokens, "config": self.config})
+            json_input = json.dumps(
+                {"tokens": tokens, "config": self.config, "variant": self.variant}
+            )
 
             # Extract keyphrases using Rust
             json_output = extract_from_json(json_input)

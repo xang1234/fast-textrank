@@ -9,6 +9,7 @@ use crate::phrase::extraction::extract_keyphrases_with_info;
 use crate::types::{Phrase, PhraseGrouping, ScoreAggregation, TextRankConfig};
 use crate::variants::biased_textrank::BiasedTextRank;
 use crate::variants::position_rank::PositionRank;
+use crate::variants::single_rank::SingleRank;
 use pyo3::prelude::*;
 
 /// A phrase extracted by TextRank
@@ -417,6 +418,71 @@ impl PyBiasedTextRank {
         format!(
             "BiasedTextRank(focus_terms={:?}, bias_weight={}, top_n={})",
             self.focus_terms, self.bias_weight, self.config.top_n
+        )
+    }
+}
+
+/// SingleRank keyword extractor
+///
+/// SingleRank uses weighted co-occurrence edges and cross-sentence
+/// windowing. The rest of the pipeline is identical to base TextRank.
+#[pyclass(name = "SingleRank")]
+pub struct PySingleRank {
+    config: TextRankConfig,
+}
+
+#[pymethods]
+impl PySingleRank {
+    #[new]
+    #[pyo3(signature = (config=None, top_n=None, language=None))]
+    fn new(
+        config: Option<PyTextRankConfig>,
+        top_n: Option<usize>,
+        language: Option<&str>,
+    ) -> PyResult<Self> {
+        let mut inner_config = config.map(|c| c.inner).unwrap_or_default();
+
+        if let Some(n) = top_n {
+            inner_config.top_n = n;
+        }
+        if let Some(lang) = language {
+            inner_config.language = lang.to_string();
+        }
+
+        Ok(Self {
+            config: inner_config,
+        })
+    }
+
+    /// Extract keywords using SingleRank
+    #[pyo3(signature = (text))]
+    fn extract_keywords(&self, text: &str) -> PyResult<PyTextRankResult> {
+        let tokenizer = Tokenizer::new();
+        let (_, mut tokens) = tokenizer.tokenize(text);
+
+        let stopwords = if self.config.stopwords.is_empty() {
+            StopwordFilter::new(&self.config.language)
+        } else {
+            StopwordFilter::with_additional(&self.config.language, &self.config.stopwords)
+        };
+        for token in &mut tokens {
+            token.is_stopword = stopwords.is_stopword(&token.text);
+        }
+
+        let extractor = SingleRank::with_config(self.config.clone());
+        let result = extractor.extract_with_info(&tokens);
+
+        Ok(PyTextRankResult {
+            phrases: result.phrases.into_iter().map(PyPhrase::from).collect(),
+            converged: result.converged,
+            iterations: result.iterations,
+        })
+    }
+
+    fn __repr__(&self) -> String {
+        format!(
+            "SingleRank(top_n={}, language='{}')",
+            self.config.top_n, self.config.language
         )
     }
 }
