@@ -1,3 +1,11 @@
+# Release Notes — v0.1.4
+
+## Bug Fixes
+
+- **Fixed missing `MultipartiteRank` Python export** — the class was registered in the Rust PyO3 module but not re-exported from `python/rapid_textrank/__init__.py`, causing `ImportError: cannot import name 'MultipartiteRank'` when installing from PyPI.
+
+---
+
 # Release Notes — v0.1.3
 
 ## New Algorithm Variants
