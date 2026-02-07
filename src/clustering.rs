@@ -158,13 +158,13 @@ pub fn jaccard_distance(a: &FxHashSet<String>, b: &FxHashSet<String>) -> f64 {
     if a.is_empty() && b.is_empty() {
         return 0.0;
     }
+    // Fast path: skip full intersection/union counts for disjoint sets
+    if a.is_disjoint(b) {
+        return 1.0;
+    }
     let intersection = a.intersection(b).count();
     let union = a.union(b).count();
-    if union == 0 {
-        1.0
-    } else {
-        1.0 - (intersection as f64 / union as f64)
-    }
+    1.0 - (intersection as f64 / union as f64)
 }
 
 /// Average linkage distance between two clusters
