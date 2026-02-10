@@ -45,3 +45,4 @@ target/criterion/
 
 # MkDocs
 site/
+.cache/
