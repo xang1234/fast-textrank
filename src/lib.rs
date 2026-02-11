@@ -18,6 +18,7 @@ pub mod graph;
 pub mod nlp;
 pub mod pagerank;
 pub mod phrase;
+pub mod pipeline;
 pub mod summarizer;
 pub mod types;
 pub mod variants;
@@ -38,6 +39,7 @@ pub use pagerank::{
     personalized::PersonalizedPageRank, standard::StandardPageRank, PageRankResult,
 };
 pub use phrase::extraction::PhraseExtractor;
+pub use pipeline::error_code::ErrorCode;
 pub use summarizer::selector::SentenceSelector;
 pub use variants::{
     biased_textrank::BiasedTextRank, multipartite_rank::MultipartiteRank,
