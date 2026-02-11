@@ -5,8 +5,8 @@
 //! feature gate for dynamic composition.
 
 use crate::pipeline::artifacts::{
-    CandidateKind, CandidateSet, CandidateSetRef, Graph, PhraseCandidate, TeleportVector,
-    TokenStream, TokenStreamRef, WordCandidate,
+    CandidateKind, CandidateSet, CandidateSetRef, Graph, PhraseCandidate, RankOutput,
+    TeleportVector, TokenStream, TokenStreamRef, WordCandidate,
 };
 use crate::types::{ChunkSpan, PosTag, TextRankConfig};
 
@@ -559,8 +559,103 @@ impl TeleportBuilder for UniformTeleportBuilder {
     }
 }
 
+// ============================================================================
+// Ranker — PageRank / Personalized PageRank execution (stage 3)
+// ============================================================================
+
+/// Executes PageRank (or a variant) on a graph, optionally using a
+/// personalization (teleport) vector.
+///
+/// This is the core ranking stage: it takes the co-occurrence [`Graph`] built
+/// by earlier stages, an optional [`TeleportVector`] produced by a
+/// [`TeleportBuilder`], and config, and returns a [`RankOutput`] containing
+/// per-node scores and convergence metadata.
+///
+/// The teleport vector determines the ranking flavor:
+///
+/// - `None` → standard PageRank (uniform teleportation).
+/// - `Some(tv)` → Personalized PageRank, where the surfer jumps to node `i`
+///   with probability `tv[i]` during teleportation.
+///
+/// # Contract
+///
+/// - **Input**: an immutable [`Graph`] reference, an optional
+///   [`TeleportVector`] reference, and config.
+/// - **Output**: a [`RankOutput`] with per-node scores, convergence flag,
+///   iteration count, and final delta.
+/// - **Config**: reads `damping`, `max_iterations`, and
+///   `convergence_threshold` from [`TextRankConfig`].
+/// - **Deterministic**: same graph + teleport + config → same output.
+/// - **Scores**: normalized (sum to 1.0) and indexed by CSR node ID.
+pub trait Ranker {
+    /// Rank nodes in the graph.
+    fn rank(
+        &self,
+        graph: &Graph,
+        teleport: Option<&TeleportVector>,
+        cfg: &TextRankConfig,
+    ) -> RankOutput;
+}
+
+/// PageRank-based ranker — the default (and currently only) [`Ranker`]
+/// implementation.
+///
+/// Handles both standard and personalized PageRank through a single struct.
+/// When `teleport` is `None`, runs standard PageRank (uniform teleportation).
+/// When `teleport` is `Some(tv)`, runs Personalized PageRank using `tv` as
+/// the teleport distribution.
+///
+/// Config parameters (damping, max_iterations, convergence_threshold) are read
+/// from [`TextRankConfig`] at call time, making this struct stateless and
+/// zero-sized — ideal for static pipeline composition.
+///
+/// # Examples
+///
+/// ```ignore
+/// let ranker = PageRankRanker;
+/// // Standard PageRank:
+/// let output = ranker.rank(&graph, None, &cfg);
+/// // Personalized PageRank:
+/// let output = ranker.rank(&graph, Some(&teleport_vec), &cfg);
+/// ```
+#[derive(Debug, Clone, Copy, Default)]
+pub struct PageRankRanker;
+
+impl Ranker for PageRankRanker {
+    fn rank(
+        &self,
+        graph: &Graph,
+        teleport: Option<&TeleportVector>,
+        cfg: &TextRankConfig,
+    ) -> RankOutput {
+        let csr = graph.csr();
+
+        let result = match teleport {
+            None => {
+                // Standard PageRank — uniform teleportation.
+                crate::pagerank::standard::StandardPageRank {
+                    damping: cfg.damping,
+                    max_iterations: cfg.max_iterations,
+                    threshold: cfg.convergence_threshold,
+                }
+                .run(csr)
+            }
+            Some(tv) => {
+                // Personalized PageRank — use the provided teleport vector.
+                crate::pagerank::personalized::PersonalizedPageRank::new()
+                    .with_damping(cfg.damping)
+                    .with_max_iterations(cfg.max_iterations)
+                    .with_threshold(cfg.convergence_threshold)
+                    .with_personalization(tv.as_slice().to_vec())
+                    .run(csr)
+            }
+        };
+
+        RankOutput::from_pagerank_result(&result)
+    }
+}
+
 // Future E3 stage traits will be added below:
-//   - Ranker                (textranker-4a0.6)
 //   - PhraseBuilder         (textranker-4a0.7)
 //   - ResultFormatter       (textranker-4a0.8)
 
@@ -1830,5 +1925,269 @@ mod tests {
 
         let result = UniformTeleportBuilder.build(stream.as_ref(), cs.as_ref(), &cfg);
         assert!(result.is_none());
+    }
+
+    // ================================================================
+    // Ranker — PageRankRanker tests
+    // ================================================================
+
+    /// Helper: build a graph from rich_tokens with default config.
+    fn build_test_graph() -> (TokenStream, CandidateSet, Graph) {
+        let tokens = rich_tokens();
+        let stream = TokenStream::from_tokens(&tokens);
+        let cfg = TextRankConfig::default();
+        let cs = word_candidates(&stream, &cfg);
+        let graph = CooccurrenceGraphBuilder::default().build(
+            stream.as_ref(),
+            cs.as_ref(),
+            &cfg,
+        );
+        (stream, cs, graph)
+    }
+
+    #[test]
+    fn test_pagerank_ranker_standard() {
+        // Standard PageRank: teleport = None.
+        let (_stream, _cs, graph) = build_test_graph();
+        let cfg = TextRankConfig::default();
+
+        let output = PageRankRanker.rank(&graph, None, &cfg);
+
+        // Should produce scores for every node.
+        assert_eq!(output.num_nodes(), graph.num_nodes());
+        assert!(output.converged());
+        assert!(output.iterations() > 0);
+        assert!(output.final_delta() <= cfg.convergence_threshold);
+
+        // Scores should sum to ~1.0.
+        let sum: f64 = output.scores().iter().sum();
+        assert!(
+            (sum - 1.0).abs() < 1e-6,
+            "Scores should sum to 1.0, got {sum}"
+        );
+    }
+
+    #[test]
+    fn test_pagerank_ranker_personalized() {
+        // Personalized PageRank with a non-uniform teleport vector.
+        let (_stream, _cs, graph) = build_test_graph();
+        let cfg = TextRankConfig::default();
+
+        // Bias heavily towards the first candidate.
+        let mut tv = TeleportVector::zeros(graph.num_nodes());
+        tv.set(0, 10.0);
+        for i in 1..graph.num_nodes() {
+            tv.set(i, 1.0);
+        }
+        tv.normalize();
+
+        let output = PageRankRanker.rank(&graph, Some(&tv), &cfg);
+
+        assert_eq!(output.num_nodes(), graph.num_nodes());
+        assert!(output.converged());
+
+        // Scores should sum to ~1.0.
+        let sum: f64 = output.scores().iter().sum();
+        assert!(
+            (sum - 1.0).abs() < 1e-6,
+            "Scores should sum to 1.0, got {sum}"
+        );
+
+        // Compare with standard: biased node should score higher.
+        let standard_output = PageRankRanker.rank(&graph, None, &cfg);
+        assert!(
+            output.score(0) > standard_output.score(0),
+            "Biased node should score higher with personalization"
+        );
+    }
+
+    #[test]
+    fn test_pagerank_ranker_empty_graph() {
+        let empty_builder = crate::graph::builder::GraphBuilder::new();
+        let graph = Graph::from_builder(&empty_builder);
+        let cfg = TextRankConfig::default();
+
+        let output = PageRankRanker.rank(&graph, None, &cfg);
+
+        assert_eq!(output.num_nodes(), 0);
+        assert!(output.converged());
+        assert_eq!(output.iterations(), 0);
+    }
+
+    #[test]
+    fn test_pagerank_ranker_single_node() {
+        // Single node, no edges (dangling).
+        let mut builder = crate::graph::builder::GraphBuilder::new();
+        builder.get_or_create_node("only|NOUN");
+        let graph = Graph::from_builder(&builder);
+        let cfg = TextRankConfig::default();
+
+        let output = PageRankRanker.rank(&graph, None, &cfg);
+
+        assert_eq!(output.num_nodes(), 1);
+        // Single node should get all the score mass.
+        assert!((output.score(0) - 1.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn test_pagerank_ranker_respects_damping() {
+        let (_stream, _cs, graph) = build_test_graph();
+        let mut cfg_low = TextRankConfig::default();
+        cfg_low.damping = 0.5;
+
+        let mut cfg_high = TextRankConfig::default();
+        cfg_high.damping = 0.95;
+
+        let output_low = PageRankRanker.rank(&graph, None, &cfg_low);
+        let output_high = PageRankRanker.rank(&graph, None, &cfg_high);
+
+        // Both should converge and have valid scores.
+        assert!(output_low.converged());
+        assert!(output_high.converged());
+
+        // With lower damping (more teleportation), scores should be more
+        // uniform. Measure via variance.
+        let mean_low = 1.0 / output_low.num_nodes() as f64;
+        let var_low: f64 = output_low
+            .scores()
+            .iter()
+            .map(|s| (s - mean_low).powi(2))
+            .sum::<f64>()
+            / output_low.num_nodes() as f64;
+
+        let mean_high = 1.0 / output_high.num_nodes() as f64;
+        let var_high: f64 = output_high
+            .scores()
+            .iter()
+            .map(|s| (s - mean_high).powi(2))
+            .sum::<f64>()
+            / output_high.num_nodes() as f64;
+
+        assert!(
+            var_low <= var_high + 1e-15,
+            "Lower damping should produce more uniform scores: var_low={var_low}, var_high={var_high}"
+        );
+    }
+
+    #[test]
+    fn test_pagerank_ranker_respects_max_iterations() {
+        // Build a star graph (asymmetric degree distribution) so the initial
+        // uniform scores are far from stationary and won't converge quickly.
+        let mut builder = crate::graph::builder::GraphBuilder::new();
+        let hub = builder.get_or_create_node("hub");
+        let leaves: Vec<u32> = (0..20)
+            .map(|i| builder.get_or_create_node(&format!("leaf_{i}")))
+            .collect();
+        for &leaf in &leaves {
+            builder.increment_edge(hub, leaf, 1.0);
+        }
+        let graph = Graph::from_builder(&builder);
+
+        let mut cfg = TextRankConfig::default();
+        cfg.max_iterations = 2;
+        cfg.convergence_threshold = 1e-15; // Practically unreachable in 2 iters.
+
+        let output = PageRankRanker.rank(&graph, None, &cfg);
+
+        // Should stop at max_iterations.
+        assert!(output.iterations() <= 2);
+        assert!(!output.converged());
+        // Should still produce valid scores.
+        assert_eq!(output.num_nodes(), 21);
+    }
+
+    #[test]
+    fn test_pagerank_ranker_uniform_teleport_matches_none() {
+        // Passing a uniform TeleportVector should produce results very
+        // close to passing None (standard PageRank).
+        let (_stream, _cs, graph) = build_test_graph();
+        let cfg = TextRankConfig::default();
+
+        let output_none = PageRankRanker.rank(&graph, None, &cfg);
+        let tv = TeleportVector::uniform(graph.num_nodes());
+        let output_uniform = PageRankRanker.rank(&graph, Some(&tv), &cfg);
+
+        for i in 0..graph.num_nodes() {
+            let diff = (output_none.score(i as u32) - output_uniform.score(i as u32)).abs();
+            assert!(
+                diff < 0.01,
+                "Node {i}: standard={}, uniform-PPR={}, diff={diff}",
+                output_none.score(i as u32),
+                output_uniform.score(i as u32),
+            );
+        }
+    }
+
+    #[test]
+    fn test_pagerank_ranker_symmetric_graph() {
+        // All nodes should have roughly equal scores in a fully connected graph.
+        let mut builder = crate::graph::builder::GraphBuilder::new();
+        let a = builder.get_or_create_node("a");
+        let b = builder.get_or_create_node("b");
+        let c = builder.get_or_create_node("c");
+        builder.increment_edge(a, b, 1.0);
+        builder.increment_edge(b, c, 1.0);
+        builder.increment_edge(a, c, 1.0);
+        let graph = Graph::from_builder(&builder);
+        let cfg = TextRankConfig::default();
+
+        let output = PageRankRanker.rank(&graph, None, &cfg);
+
+        let expected = 1.0 / 3.0;
+        for i in 0..3 {
+            assert!(
+                (output.score(i) - expected).abs() < 0.01,
+                "Node {i}: expected ~{expected}, got {}",
+                output.score(i),
+            );
+        }
+    }
+
+    #[test]
+    fn test_pagerank_ranker_as_trait_object() {
+        let ranker: Box<dyn Ranker> = Box::new(PageRankRanker);
+
+        let (_stream, _cs, graph) = build_test_graph();
+        let cfg = TextRankConfig::default();
+
+        let output = ranker.rank(&graph, None, &cfg);
+
+        assert_eq!(output.num_nodes(), graph.num_nodes());
+        assert!(output.converged());
+    }
+
+    #[test]
+    fn test_pagerank_ranker_default() {
+        let _r = PageRankRanker::default();
+    }
+
+    #[test]
+    fn test_pagerank_ranker_deterministic() {
+        // Same input should produce identical output.
+        let (_stream, _cs, graph) = build_test_graph();
+        let cfg = TextRankConfig::default();
+
+        let output1 = PageRankRanker.rank(&graph, None, &cfg);
+        let output2 = PageRankRanker.rank(&graph, None, &cfg);
+
+        assert_eq!(output1.scores(), output2.scores());
+        assert_eq!(output1.iterations(), output2.iterations());
+        assert_eq!(output1.converged(), output2.converged());
+    }
+
+    #[test]
+    fn test_pagerank_ranker_personalized_deterministic() {
+        let (_stream, _cs, graph) = build_test_graph();
+        let cfg = TextRankConfig::default();
+
+        let mut tv = TeleportVector::zeros(graph.num_nodes());
+        tv.set(0, 5.0);
+        tv.set(1, 1.0);
+        tv.normalize();
+
+        let output1 = PageRankRanker.rank(&graph, Some(&tv), &cfg);
+        let output2 = PageRankRanker.rank(&graph, Some(&tv), &cfg);
+
+        assert_eq!(output1.scores(), output2.scores());
     }
 }

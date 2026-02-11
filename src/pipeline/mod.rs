@@ -30,6 +30,6 @@ pub use artifacts::{
 // Re-export stage traits and default implementations.
 pub use traits::{
     CandidateSelector, CooccurrenceGraphBuilder, EdgeWeightPolicy, GraphBuilder, GraphTransform,
-    NoopGraphTransform, NoopPreprocessor, PhraseCandidateSelector, Preprocessor, TeleportBuilder,
-    UniformTeleportBuilder, WindowStrategy, WordNodeSelector,
+    NoopGraphTransform, NoopPreprocessor, PageRankRanker, PhraseCandidateSelector, Preprocessor,
+    Ranker, TeleportBuilder, UniformTeleportBuilder, WindowStrategy, WordNodeSelector,
 };
