@@ -585,6 +585,129 @@ mod tests {
         assert_eq!(doc.tokens.len(), 1);
     }
 
+    // ─── End-to-end JSON validation (zvl.5) ────────────────────────────
+
+    #[test]
+    fn test_validate_spec_impl_multipartite_valid() {
+        let spec: PipelineSpec = serde_json::from_str(r#"{
+            "v": 1,
+            "modules": {
+                "candidates": "phrase_candidates",
+                "clustering": "hac",
+                "graph": "candidate_graph",
+                "graph_transforms": ["remove_intra_cluster_edges", "alpha_boost"],
+                "rank": "standard_pagerank"
+            }
+        }"#).unwrap();
+        let resp = validate_spec_impl(&spec);
+        assert!(resp.valid);
+        assert_eq!(resp.report.len(), 0);
+    }
+
+    #[test]
+    fn test_validate_spec_impl_multiple_errors_all_returned() {
+        // personalized without teleport + topic_graph missing clustering
+        let spec: PipelineSpec = serde_json::from_str(r#"{
+            "v": 1,
+            "modules": {
+                "rank": "personalized_pagerank",
+                "graph": "topic_graph"
+            }
+        }"#).unwrap();
+        let resp = validate_spec_impl(&spec);
+        assert!(!resp.valid);
+
+        let json = serde_json::to_value(&resp).unwrap();
+        let diags = json["diagnostics"].as_array().unwrap();
+        // At least 3: teleport missing, clustering missing, candidates wrong
+        assert!(diags.len() >= 3, "expected >=3 diagnostics, got {}", diags.len());
+
+        // All should be errors
+        for d in diags {
+            assert_eq!(d["severity"], "error");
+        }
+    }
+
+    #[test]
+    fn test_validate_spec_impl_strict_unknown_in_response() {
+        let spec: PipelineSpec = serde_json::from_str(r#"{
+            "v": 1,
+            "strict": true,
+            "expose": {}
+        }"#).unwrap();
+        let resp = validate_spec_impl(&spec);
+        assert!(!resp.valid);
+
+        let json = serde_json::to_value(&resp).unwrap();
+        let diags = json["diagnostics"].as_array().unwrap();
+        assert_eq!(diags[0]["code"], "unknown_field");
+        assert_eq!(diags[0]["path"], "/expose");
+    }
+
+    #[test]
+    fn test_validate_only_document_with_invalid_pipeline_spec() {
+        // Malformed pipeline value — not a valid PipelineSpec
+        let doc: JsonDocument = serde_json::from_str(r#"{
+            "validate_only": true,
+            "pipeline": "not_an_object"
+        }"#).unwrap();
+        assert!(doc.validate_only);
+        // The pipeline field is a string, which won't parse as PipelineSpec
+        let result = serde_json::from_value::<PipelineSpec>(doc.pipeline.unwrap());
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_validate_only_missing_pipeline_field() {
+        // validate_only=true but no pipeline field
+        let doc: JsonDocument = serde_json::from_str(r#"{
+            "validate_only": true
+        }"#).unwrap();
+        assert!(doc.validate_only);
+        assert!(doc.pipeline.is_none());
+    }
+
+    #[test]
+    fn test_validate_response_json_has_valid_and_diagnostics() {
+        // Verify the exact JSON shape of a successful validation
+        let spec: PipelineSpec = serde_json::from_str(r#"{
+            "v": 1,
+            "modules": {
+                "rank": "personalized_pagerank",
+                "teleport": "focus_terms"
+            }
+        }"#).unwrap();
+        let resp = validate_spec_impl(&spec);
+        let json = serde_json::to_value(&resp).unwrap();
+
+        // Must have "valid" and "diagnostics" at top level
+        assert!(json.get("valid").is_some(), "missing 'valid' key");
+        assert!(json.get("diagnostics").is_some(), "missing 'diagnostics' key");
+        assert_eq!(json["valid"], true);
+        assert_eq!(json["diagnostics"].as_array().unwrap().len(), 0);
+    }
+
+    #[test]
+    fn test_validate_response_diagnostic_has_all_fields() {
+        let spec: PipelineSpec = serde_json::from_str(r#"{
+            "v": 1,
+            "modules": { "rank": "personalized_pagerank" }
+        }"#).unwrap();
+        let resp = validate_spec_impl(&spec);
+        let json = serde_json::to_value(&resp).unwrap();
+        let diag = &json["diagnostics"][0];
+
+        // Every diagnostic must have: severity, code, path, message
+        assert!(diag.get("severity").is_some(), "missing severity");
+        assert!(diag.get("code").is_some(), "missing code");
+        assert!(diag.get("path").is_some(), "missing path");
+        assert!(diag.get("message").is_some(), "missing message");
+        // hint is optional but should be present for this error
+        assert!(diag.get("hint").is_some(), "missing hint");
+    }
+
+    // ─── Existing tests ─────────────────────────────────────────────────
+
     #[test]
     fn test_json_include_pos_filtering() {
         // Create JSON with tokens of various POS, config with include_pos=["VERB"]

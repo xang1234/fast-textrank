@@ -763,4 +763,524 @@ mod tests {
         assert_eq!(diags[0]["severity"], "error");
         assert_eq!(diags[0]["code"], "missing_stage");
     }
+
+    // ═════════════════════════════════════════════════════════════════════
+    //  Comprehensive validation tests (zvl.5)
+    // ═════════════════════════════════════════════════════════════════════
+
+    // ─── Exact path + hint verification (public contract) ───────────────
+
+    #[test]
+    fn test_rank_teleport_path_and_hint() {
+        let report = engine().validate(&spec(
+            r#"{ "v": 1, "modules": { "rank": "personalized_pagerank" } }"#,
+        ));
+        let err = report.errors().next().unwrap();
+        assert_eq!(err.path, "/modules/teleport");
+        assert_eq!(err.code, ErrorCode::MissingStage);
+        let hint = err.hint.as_deref().unwrap();
+        assert!(hint.contains("position"), "hint should mention position teleport: {hint}");
+        assert!(hint.contains("focus_terms"), "hint should mention focus_terms: {hint}");
+        assert!(hint.contains("uniform"), "hint should mention uniform: {hint}");
+    }
+
+    #[test]
+    fn test_topic_graph_clustering_path_and_hint() {
+        let report = engine().validate(&spec(
+            r#"{
+                "v": 1,
+                "modules": {
+                    "candidates": "phrase_candidates",
+                    "graph": "topic_graph"
+                }
+            }"#,
+        ));
+        let err = report.errors().next().unwrap();
+        assert_eq!(err.path, "/modules/clustering");
+        assert_eq!(err.code, ErrorCode::MissingStage);
+        let hint = err.hint.as_deref().unwrap();
+        assert!(hint.contains("hac"), "hint should suggest hac clustering: {hint}");
+    }
+
+    #[test]
+    fn test_topic_graph_candidates_path_and_hint() {
+        let report = engine().validate(&spec(
+            r#"{
+                "v": 1,
+                "modules": {
+                    "candidates": "word_nodes",
+                    "graph": "topic_graph",
+                    "clustering": "hac"
+                }
+            }"#,
+        ));
+        let err = report.errors().next().unwrap();
+        assert_eq!(err.path, "/modules/candidates");
+        assert_eq!(err.code, ErrorCode::InvalidCombo);
+        let hint = err.hint.as_deref().unwrap();
+        assert!(
+            hint.contains("phrase_candidates"),
+            "hint should suggest phrase_candidates: {hint}"
+        );
+    }
+
+    #[test]
+    fn test_graph_transform_deps_path_and_hint() {
+        let report = engine().validate(&spec(
+            r#"{
+                "v": 1,
+                "modules": { "graph_transforms": ["remove_intra_cluster_edges"] }
+            }"#,
+        ));
+        let err = report.errors().next().unwrap();
+        assert_eq!(err.path, "/modules/clustering");
+        assert_eq!(err.code, ErrorCode::MissingStage);
+        assert!(err.message.contains("remove_intra_cluster_edges"));
+        let hint = err.hint.as_deref().unwrap();
+        assert!(hint.contains("hac"), "hint should suggest hac: {hint}");
+    }
+
+    #[test]
+    fn test_runtime_limit_paths_are_specific() {
+        let report = engine().validate(&spec(
+            r#"{ "v": 1, "runtime": { "max_tokens": 0, "max_nodes": 0, "max_edges": 0 } }"#,
+        ));
+        let paths: Vec<_> = report.errors().map(|e| e.path.clone()).collect();
+        assert!(paths.contains(&"/runtime/max_tokens".to_string()));
+        assert!(paths.contains(&"/runtime/max_nodes".to_string()));
+        assert!(paths.contains(&"/runtime/max_edges".to_string()));
+    }
+
+    #[test]
+    fn test_runtime_limit_hints_mention_removal() {
+        let report = engine().validate(&spec(
+            r#"{ "v": 1, "runtime": { "max_tokens": 0 } }"#,
+        ));
+        let err = report.errors().next().unwrap();
+        let hint = err.hint.as_deref().unwrap();
+        assert!(
+            hint.contains("Remove") || hint.contains("positive"),
+            "hint should suggest removal or positive value: {hint}"
+        );
+    }
+
+    #[test]
+    fn test_unknown_field_path_includes_field_name() {
+        let report = engine().validate(&spec(
+            r#"{ "v": 1, "strict": true, "expose": {} }"#,
+        ));
+        let err = report.errors().next().unwrap();
+        assert_eq!(err.path, "/expose");
+        assert_eq!(err.code, ErrorCode::UnknownField);
+        assert!(err.message.contains("expose"));
+    }
+
+    #[test]
+    fn test_unknown_field_hint_suggests_removal() {
+        let report = engine().validate(&spec(
+            r#"{ "v": 1, "strict": true, "typo": 1 }"#,
+        ));
+        let err = report.errors().next().unwrap();
+        let hint = err.hint.as_deref().unwrap();
+        assert!(
+            hint.contains("remove") || hint.contains("spelling"),
+            "hint should suggest fix: {hint}"
+        );
+    }
+
+    // ─── Realistic variant compositions (valid specs) ───────────────────
+
+    #[test]
+    fn test_base_textrank_composition() {
+        // BaseTextRank: word_nodes + cooccurrence + standard pagerank
+        let report = engine().validate(&spec(
+            r#"{
+                "v": 1,
+                "modules": {
+                    "candidates": "word_nodes",
+                    "graph": "cooccurrence_window",
+                    "rank": "standard_pagerank"
+                }
+            }"#,
+        ));
+        assert!(report.is_valid());
+        assert!(report.is_empty());
+    }
+
+    #[test]
+    fn test_position_rank_composition() {
+        // PositionRank: word_nodes + cooccurrence + position teleport + personalized
+        let report = engine().validate(&spec(
+            r#"{
+                "v": 1,
+                "modules": {
+                    "candidates": "word_nodes",
+                    "graph": "cooccurrence_window",
+                    "teleport": "position",
+                    "rank": "personalized_pagerank"
+                }
+            }"#,
+        ));
+        assert!(report.is_valid());
+    }
+
+    #[test]
+    fn test_biased_textrank_composition() {
+        // BiasedTextRank: word_nodes + cooccurrence + focus_terms teleport + personalized
+        let report = engine().validate(&spec(
+            r#"{
+                "v": 1,
+                "modules": {
+                    "candidates": "word_nodes",
+                    "graph": "cooccurrence_window",
+                    "teleport": "focus_terms",
+                    "rank": "personalized_pagerank"
+                }
+            }"#,
+        ));
+        assert!(report.is_valid());
+    }
+
+    #[test]
+    fn test_topical_pagerank_composition() {
+        // TopicalPageRank: word_nodes + cooccurrence + topic_weights teleport + personalized
+        let report = engine().validate(&spec(
+            r#"{
+                "v": 1,
+                "modules": {
+                    "candidates": "word_nodes",
+                    "graph": "cooccurrence_window",
+                    "teleport": "topic_weights",
+                    "rank": "personalized_pagerank"
+                }
+            }"#,
+        ));
+        assert!(report.is_valid());
+    }
+
+    #[test]
+    fn test_topic_rank_composition() {
+        // TopicRank: phrase_candidates + clustering + topic_graph + standard
+        let report = engine().validate(&spec(
+            r#"{
+                "v": 1,
+                "modules": {
+                    "candidates": "phrase_candidates",
+                    "clustering": "hac",
+                    "graph": "topic_graph",
+                    "rank": "standard_pagerank"
+                }
+            }"#,
+        ));
+        assert!(report.is_valid());
+    }
+
+    #[test]
+    fn test_multipartite_rank_composition() {
+        // MultipartiteRank: phrase_candidates + clustering + candidate_graph
+        // + remove_intra_cluster_edges + alpha_boost + standard
+        let report = engine().validate(&spec(
+            r#"{
+                "v": 1,
+                "modules": {
+                    "candidates": "phrase_candidates",
+                    "clustering": "hac",
+                    "graph": "candidate_graph",
+                    "graph_transforms": ["remove_intra_cluster_edges", "alpha_boost"],
+                    "rank": "standard_pagerank"
+                }
+            }"#,
+        ));
+        assert!(report.is_valid());
+    }
+
+    #[test]
+    fn test_novel_combination_singlerank_graph_with_position_teleport() {
+        // A novel mix not matching any existing variant:
+        // cooccurrence_window (could be cross-sentence) + position teleport
+        let report = engine().validate(&spec(
+            r#"{
+                "v": 1,
+                "modules": {
+                    "candidates": "word_nodes",
+                    "graph": "cooccurrence_window",
+                    "teleport": "position",
+                    "rank": "personalized_pagerank"
+                },
+                "runtime": { "max_tokens": 200000 }
+            }"#,
+        ));
+        assert!(report.is_valid());
+    }
+
+    // ─── All teleport types accepted with personalized ──────────────────
+
+    #[test]
+    fn test_all_teleport_types_valid_with_personalized() {
+        for teleport in &["uniform", "position", "focus_terms", "topic_weights"] {
+            let json = format!(
+                r#"{{
+                    "v": 1,
+                    "modules": {{
+                        "rank": "personalized_pagerank",
+                        "teleport": "{teleport}"
+                    }}
+                }}"#
+            );
+            let report = engine().validate(&spec(&json));
+            assert!(
+                report.is_valid(),
+                "teleport={teleport} should be valid with personalized_pagerank"
+            );
+        }
+    }
+
+    // ─── module_unavailable via custom rule ──────────────────────────────
+
+    #[test]
+    fn test_module_unavailable_custom_rule() {
+        // Demonstrates how a module-availability rule works:
+        // check that requested modules are in a set of available ones.
+        struct ModuleAvailabilityRule {
+            available_ranks: Vec<RankModuleType>,
+        }
+
+        impl ValidationRule for ModuleAvailabilityRule {
+            fn name(&self) -> &str {
+                "module_availability"
+            }
+            fn validate(&self, spec: &PipelineSpec) -> Vec<ValidationDiagnostic> {
+                if let Some(rank) = &spec.modules.rank {
+                    if !self.available_ranks.contains(rank) {
+                        return vec![ValidationDiagnostic::error(
+                            PipelineSpecError::new(
+                                ErrorCode::ModuleUnavailable,
+                                "/modules/rank",
+                                format!(
+                                    "rank module {:?} is not available in this build",
+                                    rank
+                                ),
+                            )
+                            .with_hint(
+                                "Check available modules with capabilities() or use a different rank module",
+                            ),
+                        )];
+                    }
+                }
+                vec![]
+            }
+        }
+
+        // Engine where only standard_pagerank is "available"
+        let mut eng = ValidationEngine::new();
+        eng.add_rule(Box::new(ModuleAvailabilityRule {
+            available_ranks: vec![RankModuleType::StandardPagerank],
+        }));
+
+        // Requesting personalized → unavailable
+        let report = eng.validate(&spec(
+            r#"{ "v": 1, "modules": { "rank": "personalized_pagerank" } }"#,
+        ));
+        assert!(report.has_errors());
+        let err = report.errors().next().unwrap();
+        assert_eq!(err.code, ErrorCode::ModuleUnavailable);
+        assert_eq!(err.path, "/modules/rank");
+        assert!(err.hint.as_deref().unwrap().contains("capabilities"));
+
+        // Requesting standard → available
+        let report = eng.validate(&spec(
+            r#"{ "v": 1, "modules": { "rank": "standard_pagerank" } }"#,
+        ));
+        assert!(report.is_valid());
+    }
+
+    // ─── Maximum error accumulation (all rules fire) ────────────────────
+
+    #[test]
+    fn test_worst_case_spec_triggers_all_rules() {
+        // A spec that violates every rule at once:
+        // - personalized without teleport (rank_teleport)
+        // - topic_graph without clustering or phrase_candidates (topic_graph_deps × 2)
+        // - remove_intra_cluster_edges without clustering (graph_transform_deps)
+        // - zero max_tokens (runtime_limits)
+        // - unknown field in strict mode (unknown_fields)
+        let report = engine().validate(&spec(
+            r#"{
+                "v": 1,
+                "strict": true,
+                "bogus": true,
+                "modules": {
+                    "rank": "personalized_pagerank",
+                    "graph": "topic_graph",
+                    "graph_transforms": ["remove_intra_cluster_edges"]
+                },
+                "runtime": { "max_tokens": 0 }
+            }"#,
+        ));
+
+        let errs: Vec<_> = report.errors().collect();
+
+        // Collect all error codes present
+        let codes: Vec<_> = errs.iter().map(|e| e.code).collect();
+        assert!(codes.contains(&ErrorCode::MissingStage)); // teleport + clustering
+        assert!(codes.contains(&ErrorCode::InvalidCombo)); // candidates mismatch
+        assert!(codes.contains(&ErrorCode::LimitExceeded)); // max_tokens=0
+        assert!(codes.contains(&ErrorCode::UnknownField)); // bogus field
+
+        // Should be at least 5 errors (teleport, clustering, candidates, transform, limit, unknown)
+        assert!(
+            errs.len() >= 5,
+            "Expected at least 5 errors, got {}: {:?}",
+            errs.len(),
+            codes
+        );
+    }
+
+    // ─── Error code coverage: every code used by default rules ──────────
+
+    #[test]
+    fn test_missing_stage_code_used() {
+        let report = engine().validate(&spec(
+            r#"{ "v": 1, "modules": { "rank": "personalized_pagerank" } }"#,
+        ));
+        assert!(report.errors().any(|e| e.code == ErrorCode::MissingStage));
+    }
+
+    #[test]
+    fn test_invalid_combo_code_used() {
+        let report = engine().validate(&spec(
+            r#"{
+                "v": 1,
+                "modules": {
+                    "candidates": "word_nodes",
+                    "graph": "topic_graph",
+                    "clustering": "hac"
+                }
+            }"#,
+        ));
+        assert!(report.errors().any(|e| e.code == ErrorCode::InvalidCombo));
+    }
+
+    #[test]
+    fn test_limit_exceeded_code_used() {
+        let report = engine().validate(&spec(
+            r#"{ "v": 1, "runtime": { "max_edges": 0 } }"#,
+        ));
+        assert!(report.errors().any(|e| e.code == ErrorCode::LimitExceeded));
+    }
+
+    #[test]
+    fn test_unknown_field_code_used() {
+        let report = engine().validate(&spec(
+            r#"{ "v": 1, "strict": true, "nope": 1 }"#,
+        ));
+        assert!(report.errors().any(|e| e.code == ErrorCode::UnknownField));
+    }
+
+    // ─── Strict vs non-strict with multiple unknowns ────────────────────
+
+    #[test]
+    fn test_multiple_unknown_fields_all_reported() {
+        let report = engine().validate(&spec(
+            r#"{
+                "v": 1,
+                "strict": true,
+                "foo": 1,
+                "bar": 2,
+                "modules": { "baz": 3 }
+            }"#,
+        ));
+        let errs: Vec<_> = report.errors().collect();
+        assert_eq!(errs.len(), 3); // foo, bar, baz
+        let paths: Vec<_> = errs.iter().map(|e| e.path.as_str()).collect();
+        assert!(paths.contains(&"/foo"));
+        assert!(paths.contains(&"/bar"));
+        assert!(paths.contains(&"/modules/baz"));
+    }
+
+    #[test]
+    fn test_non_strict_unknown_fields_are_all_warnings() {
+        let report = engine().validate(&spec(
+            r#"{
+                "v": 1,
+                "strict": false,
+                "a": 1,
+                "b": 2
+            }"#,
+        ));
+        assert!(report.is_valid()); // no errors
+        assert_eq!(report.warnings().count(), 2);
+    }
+
+    // ─── Spec deserialization edge cases ─────────────────────────────────
+
+    #[test]
+    fn test_empty_modules_is_valid() {
+        let report = engine().validate(&spec(
+            r#"{ "v": 1, "modules": {} }"#,
+        ));
+        assert!(report.is_valid());
+    }
+
+    #[test]
+    fn test_empty_graph_transforms_is_valid() {
+        let report = engine().validate(&spec(
+            r#"{ "v": 1, "modules": { "graph_transforms": [] } }"#,
+        ));
+        assert!(report.is_valid());
+    }
+
+    #[test]
+    fn test_spec_with_preset_is_valid() {
+        let report = engine().validate(&spec(
+            r#"{ "v": 1, "preset": "textrank" }"#,
+        ));
+        assert!(report.is_valid());
+    }
+
+    #[test]
+    fn test_multiple_graph_transforms() {
+        // Both transforms present with clustering → valid
+        let report = engine().validate(&spec(
+            r#"{
+                "v": 1,
+                "modules": {
+                    "candidates": "phrase_candidates",
+                    "clustering": "hac",
+                    "graph": "candidate_graph",
+                    "graph_transforms": ["remove_intra_cluster_edges", "alpha_boost"]
+                }
+            }"#,
+        ));
+        assert!(report.is_valid());
+    }
+
+    #[test]
+    fn test_candidate_graph_message_names_graph_type() {
+        let report = engine().validate(&spec(
+            r#"{
+                "v": 1,
+                "modules": {
+                    "candidates": "phrase_candidates",
+                    "graph": "candidate_graph"
+                }
+            }"#,
+        ));
+        let err = report.errors().next().unwrap();
+        assert!(
+            err.message.contains("candidate_graph"),
+            "message should name the graph type: {}",
+            err.message
+        );
+    }
+
+    #[test]
+    fn test_topic_graph_message_names_graph_type() {
+        let report = engine().validate(&spec(
+            r#"{ "v": 1, "modules": { "graph": "topic_graph" } }"#,
+        ));
+        // First error should mention topic_graph
+        let errs: Vec<_> = report.errors().collect();
+        assert!(errs.iter().any(|e| e.message.contains("topic_graph")));
+    }
 }
