@@ -24,10 +24,10 @@ use crate::pipeline::observer::{
     STAGE_TELEPORT,
 };
 use crate::pipeline::traits::{
-    CandidateSelector, ChunkPhraseBuilder, CooccurrenceGraphBuilder, GraphBuilder, GraphTransform,
-    NoopGraphTransform, NoopPreprocessor, PageRankRanker, PhraseBuilder, Preprocessor, Ranker,
-    ResultFormatter, StandardResultFormatter, TeleportBuilder, UniformTeleportBuilder,
-    WordNodeSelector,
+    CandidateSelector, ChunkPhraseBuilder, CooccurrenceGraphBuilder, FocusTermsTeleportBuilder,
+    GraphBuilder, GraphTransform, NoopGraphTransform, NoopPreprocessor, PageRankRanker,
+    PhraseBuilder, PositionTeleportBuilder, Preprocessor, Ranker, ResultFormatter,
+    StandardResultFormatter, TeleportBuilder, UniformTeleportBuilder, WordNodeSelector,
 };
 use crate::types::TextRankConfig;
 
@@ -109,6 +109,76 @@ impl BaseTextRankPipeline {
             graph_builder: CooccurrenceGraphBuilder::default(),
             graph_transform: NoopGraphTransform,
             teleport_builder: UniformTeleportBuilder,
+            ranker: PageRankRanker,
+            phrase_builder: ChunkPhraseBuilder,
+            formatter: StandardResultFormatter,
+        }
+    }
+}
+
+/// Type alias for the PositionRank pipeline.
+///
+/// Identical to [`BaseTextRankPipeline`] except for the teleport stage:
+/// uses [`PositionTeleportBuilder`] instead of [`UniformTeleportBuilder`].
+pub type PositionRankPipeline = Pipeline<
+    NoopPreprocessor,
+    WordNodeSelector,
+    CooccurrenceGraphBuilder,
+    NoopGraphTransform,
+    PositionTeleportBuilder,
+    PageRankRanker,
+    ChunkPhraseBuilder,
+    StandardResultFormatter,
+>;
+
+impl PositionRankPipeline {
+    /// Build a pipeline for the PositionRank algorithm.
+    ///
+    /// Same as BaseTextRank but with position-biased teleportation:
+    /// earlier-occurring candidates receive higher teleport probability.
+    pub fn position_rank() -> Self {
+        Pipeline {
+            preprocessor: NoopPreprocessor,
+            selector: WordNodeSelector,
+            graph_builder: CooccurrenceGraphBuilder::default(),
+            graph_transform: NoopGraphTransform,
+            teleport_builder: PositionTeleportBuilder,
+            ranker: PageRankRanker,
+            phrase_builder: ChunkPhraseBuilder,
+            formatter: StandardResultFormatter,
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// BiasedTextRankPipeline — focus-term biased teleportation
+// ---------------------------------------------------------------------------
+
+/// Pipeline alias for BiasedTextRank: base pipeline + focus-term teleportation.
+pub type BiasedTextRankPipeline = Pipeline<
+    NoopPreprocessor,
+    WordNodeSelector,
+    CooccurrenceGraphBuilder,
+    NoopGraphTransform,
+    FocusTermsTeleportBuilder,
+    PageRankRanker,
+    ChunkPhraseBuilder,
+    StandardResultFormatter,
+>;
+
+impl BiasedTextRankPipeline {
+    /// Build a pipeline for the BiasedTextRank algorithm.
+    ///
+    /// Same as BaseTextRank but with focus-term biased teleportation:
+    /// candidates matching `focus_terms` receive `bias_weight` relative
+    /// to the base weight of `1.0` for non-focus candidates.
+    pub fn biased(focus_terms: Vec<String>, bias_weight: f64) -> Self {
+        Pipeline {
+            preprocessor: NoopPreprocessor,
+            selector: WordNodeSelector,
+            graph_builder: CooccurrenceGraphBuilder::default(),
+            graph_transform: NoopGraphTransform,
+            teleport_builder: FocusTermsTeleportBuilder::new(focus_terms, bias_weight),
             ranker: PageRankRanker,
             phrase_builder: ChunkPhraseBuilder,
             formatter: StandardResultFormatter,

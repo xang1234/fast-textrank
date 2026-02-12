@@ -799,6 +799,30 @@ impl Graph {
 // TeleportVector — personalization distribution for PageRank
 // ============================================================================
 
+/// The kind of teleport (personalization) strategy that produced this vector.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TeleportType {
+    /// Uniform distribution — equivalent to standard (non-personalized) PageRank.
+    Uniform,
+    /// Position-weighted — earlier tokens get higher teleport probability (PositionRank).
+    Position,
+    /// Focus-terms — specified terms get boosted teleport probability (BiasedTextRank).
+    Focus,
+    /// Topic-weighted — per-lemma weights from an external topic model (TopicalPageRank).
+    Topic,
+}
+
+impl std::fmt::Display for TeleportType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Uniform => write!(f, "uniform"),
+            Self::Position => write!(f, "position"),
+            Self::Focus => write!(f, "focus"),
+            Self::Topic => write!(f, "topic"),
+        }
+    }
+}
+
 /// A personalization (teleport) vector for PageRank.
 ///
 /// Each entry `v[i]` is the teleport probability for CSR node `i`.  When used
@@ -807,48 +831,81 @@ impl Graph {
 ///
 /// # Normalization
 ///
-/// Builders are responsible for producing a **normalized** vector (entries sum
-/// to 1.0).  Use [`TeleportVector::normalize`] if needed, or check with
-/// [`TeleportVector::is_normalized`].
+/// The [`new`](TeleportVector::new) constructor **enforces** normalization —
+/// it panics if the values do not sum to approximately 1.0.  Use
+/// [`zeros`](TeleportVector::zeros) for sparse construction followed by
+/// [`normalize`](TeleportVector::normalize).
 ///
 /// # Construction
 ///
-/// - [`TeleportVector::new`] — from a pre-built `Vec<f64>`
+/// - [`TeleportVector::new`] — from a pre-normalized `Vec<f64>` (validates)
 /// - [`TeleportVector::uniform`] — uniform distribution of given length
 /// - [`TeleportVector::zeros`] — zero vector (for sparse construction)
+///
+/// # Metadata
+///
+/// Each vector carries a [`TeleportType`] describing the strategy that
+/// produced it, and an optional `debug_source` string for diagnostic output.
 #[derive(Debug, Clone, PartialEq)]
 pub struct TeleportVector {
     values: Vec<f64>,
+    teleport_type: TeleportType,
+    debug_source: Option<String>,
 }
 
 impl TeleportVector {
-    /// Create from a raw probability vector.
+    /// Normalization tolerance used by [`new`](Self::new).
+    const NORM_EPSILON: f64 = 1e-6;
+
+    /// Create from a pre-normalized probability vector.
     ///
-    /// The caller is responsible for ensuring the vector has the correct
-    /// length (one entry per graph node) and is normalized.
-    #[inline]
-    pub fn new(values: Vec<f64>) -> Self {
-        Self { values }
+    /// # Panics
+    ///
+    /// Panics if `values` is non-empty and does not sum to approximately 1.0
+    /// (tolerance: 1e-6).  Use [`zeros`](Self::zeros) for sparse construction
+    /// followed by [`normalize`](Self::normalize).
+    pub fn new(values: Vec<f64>, teleport_type: TeleportType) -> Self {
+        if !values.is_empty() {
+            let sum: f64 = values.iter().sum();
+            assert!(
+                (sum - 1.0).abs() < Self::NORM_EPSILON,
+                "TeleportVector::new requires a normalized vector (sum ≈ 1.0), got sum = {sum}"
+            );
+        }
+        Self {
+            values,
+            teleport_type,
+            debug_source: None,
+        }
     }
 
     /// Create a uniform distribution of length `n`.
     ///
     /// Each entry is `1.0 / n`.  Returns an empty vector when `n == 0`.
+    /// The [`teleport_type`](Self::teleport_type) is [`TeleportType::Uniform`].
     pub fn uniform(n: usize) -> Self {
         if n == 0 {
-            return Self { values: Vec::new() };
+            return Self {
+                values: Vec::new(),
+                teleport_type: TeleportType::Uniform,
+                debug_source: None,
+            };
         }
         Self {
             values: vec![1.0 / n as f64; n],
+            teleport_type: TeleportType::Uniform,
+            debug_source: None,
         }
     }
 
     /// Create a zero vector of length `n` for sparse construction.
     ///
     /// The caller should set individual entries and then call [`normalize`].
-    pub fn zeros(n: usize) -> Self {
+    pub fn zeros(n: usize, teleport_type: TeleportType) -> Self {
         Self {
             values: vec![0.0; n],
+            teleport_type,
+            debug_source: None,
         }
     }
 
@@ -923,6 +980,25 @@ impl TeleportVector {
                 *v = uniform;
             }
         }
+    }
+
+    /// The teleport strategy that produced this vector.
+    #[inline]
+    pub fn teleport_type(&self) -> TeleportType {
+        self.teleport_type
+    }
+
+    /// Optional description of how this vector was built (for debug output).
+    #[inline]
+    pub fn debug_source(&self) -> Option<&str> {
+        self.debug_source.as_deref()
+    }
+
+    /// Attach a debug-source description (builder pattern).
+    #[inline]
+    pub fn with_source(mut self, source: impl Into<String>) -> Self {
+        self.debug_source = Some(source.into());
+        self
     }
 
     /// Consume and return the inner `Vec<f64>`.
@@ -1980,11 +2056,28 @@ mod tests {
 
     #[test]
     fn test_teleport_vector_new() {
-        let tv = TeleportVector::new(vec![0.5, 0.3, 0.2]);
+        let tv = TeleportVector::new(vec![0.5, 0.3, 0.2], TeleportType::Uniform);
 
         assert_eq!(tv.len(), 3);
         assert!(!tv.is_empty());
         assert_eq!(tv.as_slice(), &[0.5, 0.3, 0.2]);
+        assert_eq!(tv.teleport_type(), TeleportType::Uniform);
+        assert!(tv.debug_source().is_none());
+    }
+
+    #[test]
+    fn test_teleport_vector_metadata() {
+        let tv = TeleportVector::new(vec![0.5, 0.3, 0.2], TeleportType::Focus)
+            .with_source("focus on 'machine learning'");
+
+        assert_eq!(tv.teleport_type(), TeleportType::Focus);
+        assert_eq!(tv.debug_source(), Some("focus on 'machine learning'"));
+    }
+
+    #[test]
+    #[should_panic(expected = "normalized")]
+    fn test_teleport_vector_new_rejects_unnormalized() {
+        TeleportVector::new(vec![1.0, 1.0, 1.0], TeleportType::Uniform);
     }
 
     #[test]
@@ -1993,6 +2086,7 @@ mod tests {
 
         assert_eq!(tv.len(), 4);
         assert!(tv.is_normalized(1e-15));
+        assert_eq!(tv.teleport_type(), TeleportType::Uniform);
         for &v in tv.as_slice() {
             assert!((v - 0.25).abs() < 1e-15);
         }
@@ -2009,9 +2103,10 @@ mod tests {
 
     #[test]
     fn test_teleport_vector_zeros() {
-        let tv = TeleportVector::zeros(5);
+        let tv = TeleportVector::zeros(5, TeleportType::Position);
 
         assert_eq!(tv.len(), 5);
+        assert_eq!(tv.teleport_type(), TeleportType::Position);
         for &v in tv.as_slice() {
             assert!(v.abs() < 1e-15);
         }
@@ -2019,7 +2114,7 @@ mod tests {
 
     #[test]
     fn test_teleport_vector_get() {
-        let tv = TeleportVector::new(vec![0.1, 0.9]);
+        let tv = TeleportVector::new(vec![0.1, 0.9], TeleportType::Uniform);
 
         assert!((tv.get(0) - 0.1).abs() < 1e-15);
         assert!((tv.get(1) - 0.9).abs() < 1e-15);
@@ -2029,7 +2124,7 @@ mod tests {
 
     #[test]
     fn test_teleport_vector_set() {
-        let mut tv = TeleportVector::zeros(3);
+        let mut tv = TeleportVector::zeros(3, TeleportType::Uniform);
 
         tv.set(0, 0.5);
         tv.set(2, 0.5);
@@ -2041,7 +2136,7 @@ mod tests {
 
     #[test]
     fn test_teleport_vector_index() {
-        let tv = TeleportVector::new(vec![0.3, 0.7]);
+        let tv = TeleportVector::new(vec![0.3, 0.7], TeleportType::Uniform);
 
         assert!((tv[0] - 0.3).abs() < 1e-15);
         assert!((tv[1] - 0.7).abs() < 1e-15);
@@ -2049,7 +2144,7 @@ mod tests {
 
     #[test]
     fn test_teleport_vector_index_mut() {
-        let mut tv = TeleportVector::new(vec![0.5, 0.5]);
+        let mut tv = TeleportVector::new(vec![0.5, 0.5], TeleportType::Uniform);
 
         tv[0] = 0.8;
         tv[1] = 0.2;
@@ -2060,16 +2155,23 @@ mod tests {
 
     #[test]
     fn test_teleport_vector_is_normalized() {
-        let tv = TeleportVector::new(vec![0.5, 0.3, 0.2]);
+        let tv = TeleportVector::new(vec![0.5, 0.3, 0.2], TeleportType::Uniform);
         assert!(tv.is_normalized(1e-10));
 
-        let tv2 = TeleportVector::new(vec![1.0, 1.0, 1.0]);
+        // Use zeros + set to build an unnormalized vector for testing is_normalized.
+        let mut tv2 = TeleportVector::zeros(3, TeleportType::Uniform);
+        tv2.set(0, 1.0);
+        tv2.set(1, 1.0);
+        tv2.set(2, 1.0);
         assert!(!tv2.is_normalized(1e-10));
     }
 
     #[test]
     fn test_teleport_vector_normalize() {
-        let mut tv = TeleportVector::new(vec![2.0, 3.0, 5.0]);
+        let mut tv = TeleportVector::zeros(3, TeleportType::Uniform);
+        tv.set(0, 2.0);
+        tv.set(1, 3.0);
+        tv.set(2, 5.0);
         tv.normalize();
 
         assert!(tv.is_normalized(1e-10));
@@ -2080,7 +2182,7 @@ mod tests {
 
     #[test]
     fn test_teleport_vector_normalize_zero_sum() {
-        let mut tv = TeleportVector::zeros(3);
+        let mut tv = TeleportVector::zeros(3, TeleportType::Uniform);
         tv.normalize();
 
         // Falls back to uniform.
@@ -2092,7 +2194,7 @@ mod tests {
 
     #[test]
     fn test_teleport_vector_normalize_empty() {
-        let mut tv = TeleportVector::new(vec![]);
+        let mut tv = TeleportVector::new(vec![], TeleportType::Uniform);
         tv.normalize();
 
         assert!(tv.is_empty());
@@ -2101,7 +2203,7 @@ mod tests {
 
     #[test]
     fn test_teleport_vector_into_inner() {
-        let tv = TeleportVector::new(vec![0.1, 0.2, 0.7]);
+        let tv = TeleportVector::new(vec![0.1, 0.2, 0.7], TeleportType::Uniform);
         let inner = tv.into_inner();
 
         assert_eq!(inner, vec![0.1, 0.2, 0.7]);
@@ -2109,7 +2211,7 @@ mod tests {
 
     #[test]
     fn test_teleport_vector_iter() {
-        let tv = TeleportVector::new(vec![0.3, 0.7]);
+        let tv = TeleportVector::new(vec![0.3, 0.7], TeleportType::Uniform);
         let sum: f64 = tv.iter().sum();
 
         assert!((sum - 1.0).abs() < 1e-15);
@@ -2117,7 +2219,7 @@ mod tests {
 
     #[test]
     fn test_teleport_vector_as_mut_slice() {
-        let mut tv = TeleportVector::zeros(3);
+        let mut tv = TeleportVector::zeros(3, TeleportType::Uniform);
         let slice = tv.as_mut_slice();
         slice[0] = 0.5;
         slice[1] = 0.3;
@@ -2128,7 +2230,7 @@ mod tests {
 
     #[test]
     fn test_teleport_vector_clone_eq() {
-        let tv = TeleportVector::new(vec![0.25, 0.25, 0.5]);
+        let tv = TeleportVector::new(vec![0.25, 0.25, 0.5], TeleportType::Position);
         let cloned = tv.clone();
 
         assert_eq!(tv, cloned);
@@ -2137,7 +2239,7 @@ mod tests {
     #[test]
     #[should_panic]
     fn test_teleport_vector_index_out_of_bounds() {
-        let tv = TeleportVector::new(vec![1.0]);
+        let tv = TeleportVector::new(vec![1.0], TeleportType::Uniform);
         let _ = tv[5]; // should panic
     }
 

@@ -6,8 +6,8 @@
 
 use crate::pipeline::artifacts::{
     CandidateKind, CandidateSet, CandidateSetRef, DebugPayload, FormattedResult, Graph,
-    PhraseCandidate, PhraseSet, RankOutput, TeleportVector, TokenStream, TokenStreamRef,
-    WordCandidate,
+    PhraseCandidate, PhraseSet, RankOutput, TeleportType, TeleportVector, TokenStream,
+    TokenStreamRef, WordCandidate,
 };
 use crate::types::{ChunkSpan, PosTag, TextRankConfig};
 
@@ -561,6 +561,106 @@ impl TeleportBuilder for UniformTeleportBuilder {
     }
 }
 
+/// Position-biased teleport builder for PositionRank.
+///
+/// Assigns teleport probability inversely proportional to each candidate's
+/// first occurrence position in the document: `weight = 1 / (position + 1)`.
+/// Earlier candidates receive higher teleport probability, biasing PageRank
+/// towards terms that appear near the start of the text.
+///
+/// Returns `None` for phrase-level candidates or empty candidate sets
+/// (falling back to uniform teleportation).
+#[derive(Debug, Clone, Copy, Default)]
+pub struct PositionTeleportBuilder;
+
+impl TeleportBuilder for PositionTeleportBuilder {
+    fn build(
+        &self,
+        _tokens: TokenStreamRef<'_>,
+        candidates: CandidateSetRef<'_>,
+        _cfg: &TextRankConfig,
+    ) -> Option<TeleportVector> {
+        let words = match candidates.kind() {
+            CandidateKind::Words(w) => w,
+            CandidateKind::Phrases(_) => return None,
+        };
+        if words.is_empty() {
+            return None;
+        }
+
+        let mut tv = TeleportVector::zeros(words.len(), TeleportType::Position);
+        for (i, w) in words.iter().enumerate() {
+            tv.set(i, 1.0 / (w.first_position as f64 + 1.0));
+        }
+        tv.normalize();
+        Some(tv)
+    }
+}
+
+// ---------------------------------------------------------------------------
+// FocusTermsTeleportBuilder — boosts focus-term nodes (BiasedTextRank)
+// ---------------------------------------------------------------------------
+
+/// Assigns higher teleport probability to candidates whose lemma matches one
+/// of the specified focus terms. Non-focus candidates receive a small uniform
+/// base weight (`1.0`), while focus candidates receive `bias_weight`.
+///
+/// The resulting vector is normalized so the values form a valid probability
+/// distribution.
+///
+/// Returns `None` for phrase-level candidates or empty candidate sets.
+#[derive(Debug, Clone)]
+pub struct FocusTermsTeleportBuilder {
+    /// Focus terms (lowercased / lemmatized).
+    focus_terms: Vec<String>,
+    /// Weight multiplier for focus-term nodes (typically >> 1.0).
+    bias_weight: f64,
+}
+
+impl FocusTermsTeleportBuilder {
+    /// Create a new builder with the given focus terms and bias weight.
+    ///
+    /// `focus_terms` should be lemmatized to match the candidate pool.
+    /// `bias_weight` is the relative weight for focus nodes vs the base weight
+    /// of `1.0` for non-focus nodes — e.g. `5.0` means focus nodes are 5x
+    /// more likely as teleportation targets.
+    pub fn new(focus_terms: Vec<String>, bias_weight: f64) -> Self {
+        Self {
+            focus_terms,
+            bias_weight,
+        }
+    }
+}
+
+impl TeleportBuilder for FocusTermsTeleportBuilder {
+    fn build(
+        &self,
+        tokens: TokenStreamRef<'_>,
+        candidates: CandidateSetRef<'_>,
+        _cfg: &TextRankConfig,
+    ) -> Option<TeleportVector> {
+        let words = match candidates.kind() {
+            CandidateKind::Words(w) => w,
+            CandidateKind::Phrases(_) => return None,
+        };
+        if words.is_empty() {
+            return None;
+        }
+
+        let pool = tokens.pool();
+        let mut tv = TeleportVector::zeros(words.len(), TeleportType::Focus);
+
+        for (i, w) in words.iter().enumerate() {
+            let lemma = pool.get(w.lemma_id).unwrap_or("");
+            let is_focus = self.focus_terms.iter().any(|ft| ft == lemma);
+            tv.set(i, if is_focus { self.bias_weight } else { 1.0 });
+        }
+
+        tv.normalize();
+        Some(tv)
+    }
+}
+
 // ============================================================================
 // Ranker — PageRank / Personalized PageRank execution (stage 3)
 // ============================================================================
@@ -867,6 +967,8 @@ impl PhraseBuilder for ChunkPhraseBuilder {
 mod tests {
     use super::*;
     use crate::pipeline::artifacts::CandidateKind;
+    use crate::pipeline::observer::NoopObserver;
+    use crate::pipeline::runner::BaseTextRankPipeline;
     use crate::types::{ChunkSpan, PosTag, Token};
 
     fn sample_tokens() -> Vec<Token> {
@@ -1954,6 +2056,98 @@ mod tests {
         assert!(result.is_none());
     }
 
+    // ================================================================
+    // TeleportBuilder — PositionTeleportBuilder tests
+    // ================================================================
+
+    #[test]
+    fn test_position_teleport_returns_normalized_vector() {
+        let tokens = rich_tokens();
+        let stream = TokenStream::from_tokens(&tokens);
+        let cfg = TextRankConfig::default();
+        let cs = word_candidates(&stream, &cfg);
+
+        let result = PositionTeleportBuilder.build(stream.as_ref(), cs.as_ref(), &cfg);
+        assert!(result.is_some());
+
+        let tv = result.unwrap();
+        assert_eq!(tv.len(), cs.len());
+        assert!(tv.is_normalized(1e-10));
+        assert_eq!(tv.teleport_type(), TeleportType::Position);
+    }
+
+    #[test]
+    fn test_position_teleport_earlier_positions_higher_weight() {
+        let tokens = rich_tokens();
+        let stream = TokenStream::from_tokens(&tokens);
+        let cfg = TextRankConfig::default();
+        let cs = word_candidates(&stream, &cfg);
+
+        let tv = PositionTeleportBuilder
+            .build(stream.as_ref(), cs.as_ref(), &cfg)
+            .unwrap();
+
+        // The candidate with first_position == 0 should have the highest weight.
+        let max_val = tv.as_slice().iter().cloned().fold(f64::NEG_INFINITY, f64::max);
+        let first_candidate_pos = cs.words().iter().position(|w| w.first_position == 0);
+        if let Some(idx) = first_candidate_pos {
+            assert!(
+                (tv[idx] - max_val).abs() < 1e-10,
+                "Candidate at position 0 should have max weight"
+            );
+        }
+    }
+
+    #[test]
+    fn test_position_teleport_empty_candidates() {
+        let stream = TokenStream::from_tokens(&[]);
+        let cfg = TextRankConfig::default();
+        let cs = word_candidates(&stream, &cfg);
+
+        let result = PositionTeleportBuilder.build(stream.as_ref(), cs.as_ref(), &cfg);
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_position_teleport_phrase_candidates_returns_none() {
+        let tokens = vec![
+            Token::new("big", "big", PosTag::Adjective, 0, 3, 0, 0),
+            Token::new("cat", "cat", PosTag::Noun, 4, 7, 0, 1),
+        ];
+        let stream = TokenStream::from_tokens(&tokens);
+        let cfg = TextRankConfig::default();
+        let chunks = vec![ChunkSpan {
+            start_token: 0, end_token: 2, start_char: 0, end_char: 7, sentence_idx: 0,
+        }];
+        let cs = PhraseCandidateSelector::new(chunks).select(stream.as_ref(), &cfg);
+
+        let result = PositionTeleportBuilder.build(stream.as_ref(), cs.as_ref(), &cfg);
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_position_teleport_as_trait_object() {
+        let builder: Box<dyn TeleportBuilder> = Box::new(PositionTeleportBuilder);
+
+        let tokens = rich_tokens();
+        let stream = TokenStream::from_tokens(&tokens);
+        let cfg = TextRankConfig::default();
+        let cs = word_candidates(&stream, &cfg);
+
+        let result = builder.build(stream.as_ref(), cs.as_ref(), &cfg);
+        assert!(result.is_some());
+        assert!(result.unwrap().is_normalized(1e-10));
+    }
+
+    #[test]
+    fn test_position_teleport_default() {
+        let _tb = PositionTeleportBuilder::default();
+    }
+
+    // ================================================================
+    // TeleportBuilder — custom builder tests
+    // ================================================================
+
     #[test]
     fn test_custom_teleport_builder_returns_vector() {
         /// A test builder that assigns weight based on first_position.
@@ -1974,7 +2168,7 @@ mod tests {
                     return None;
                 }
 
-                let mut tv = TeleportVector::zeros(words.len());
+                let mut tv = TeleportVector::zeros(words.len(), TeleportType::Position);
                 for (i, w) in words.iter().enumerate() {
                     tv.set(i, 1.0 / (w.first_position as f64 + 1.0));
                 }
@@ -2024,10 +2218,12 @@ mod tests {
                     return None;
                 }
 
-                let mut tv = TeleportVector::new(vec![1.0; words.len()]);
+                let mut tv = TeleportVector::zeros(words.len(), TeleportType::Focus);
                 for (i, w) in words.iter().enumerate() {
                     if self.focus_lemma_ids.contains(&w.lemma_id) {
                         tv.set(i, self.bias);
+                    } else {
+                        tv.set(i, 1.0);
                     }
                 }
                 tv.normalize();
@@ -2132,6 +2328,309 @@ mod tests {
     }
 
     // ================================================================
+    // PositionTeleportBuilder — edge cases
+    // ================================================================
+
+    #[test]
+    fn test_position_teleport_single_candidate() {
+        // A single candidate should produce a vector of [1.0].
+        let tokens = vec![
+            Token::new("Rust", "rust", PosTag::Noun, 0, 4, 0, 0),
+        ];
+        let stream = TokenStream::from_tokens(&tokens);
+        let cfg = TextRankConfig::default();
+        let cs = word_candidates(&stream, &cfg);
+        assert_eq!(cs.len(), 1);
+
+        let tv = PositionTeleportBuilder
+            .build(stream.as_ref(), cs.as_ref(), &cfg)
+            .unwrap();
+        assert_eq!(tv.len(), 1);
+        assert!((tv[0] - 1.0).abs() < 1e-10);
+        assert!(tv.is_normalized(1e-10));
+    }
+
+    #[test]
+    fn test_position_teleport_all_same_position() {
+        // All candidates at the same first_position → uniform after normalization.
+        // We achieve this by having all tokens at position 0 with unique lemmas.
+        let tokens = vec![
+            Token::new("alpha", "alpha", PosTag::Noun, 0, 5, 0, 0),
+            Token::new("beta", "beta", PosTag::Noun, 6, 10, 0, 0),
+            Token::new("gamma", "gamma", PosTag::Noun, 11, 16, 0, 0),
+        ];
+        let stream = TokenStream::from_tokens(&tokens);
+        // Use default config but ensure all POS tags pass the filter.
+        let cfg = TextRankConfig::default();
+        let cs = word_candidates(&stream, &cfg);
+
+        // The WordNodeSelector deduplicates by graph key and records
+        // first_position for each unique key. Since all three have
+        // token_position=0, they all get first_position=0 in the
+        // candidate set.
+        let tv = PositionTeleportBuilder
+            .build(stream.as_ref(), cs.as_ref(), &cfg)
+            .unwrap();
+
+        assert!(tv.is_normalized(1e-10));
+        // All weights should be equal (same position → same raw weight).
+        let expected = 1.0 / tv.len() as f64;
+        for &v in tv.as_slice() {
+            assert!(
+                (v - expected).abs() < 1e-10,
+                "Same-position candidates should produce uniform distribution, got {v} expected {expected}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_position_teleport_many_candidates_normalization() {
+        // Verify normalization precision with many candidates.
+        let tokens: Vec<Token> = (0usize..50)
+            .map(|i| {
+                let name = format!("word{i}");
+                Token::new(&name, &name, PosTag::Noun, i * 10, i * 10 + 5, 0, i)
+            })
+            .collect();
+        let stream = TokenStream::from_tokens(&tokens);
+        let cfg = TextRankConfig::default();
+        let cs = word_candidates(&stream, &cfg);
+
+        let tv = PositionTeleportBuilder
+            .build(stream.as_ref(), cs.as_ref(), &cfg)
+            .unwrap();
+
+        assert!(tv.is_normalized(1e-10));
+        assert_eq!(tv.len(), cs.len());
+        // All values should be positive.
+        for &v in tv.as_slice() {
+            assert!(v > 0.0, "All teleport values should be positive");
+        }
+    }
+
+    // ================================================================
+    // FocusTermsTeleportBuilder tests
+    // ================================================================
+
+    #[test]
+    fn test_focus_teleport_returns_normalized_vector() {
+        let tokens = rich_tokens();
+        let stream = TokenStream::from_tokens(&tokens);
+        let cfg = TextRankConfig::default();
+        let cs = word_candidates(&stream, &cfg);
+
+        let builder = FocusTermsTeleportBuilder::new(
+            vec!["machine".to_string()],
+            10.0,
+        );
+
+        let result = builder.build(stream.as_ref(), cs.as_ref(), &cfg);
+        assert!(result.is_some());
+
+        let tv = result.unwrap();
+        assert_eq!(tv.len(), cs.len());
+        assert!(tv.is_normalized(1e-10));
+        assert_eq!(tv.teleport_type(), TeleportType::Focus);
+    }
+
+    #[test]
+    fn test_focus_teleport_boosts_focus_terms() {
+        let tokens = rich_tokens();
+        let stream = TokenStream::from_tokens(&tokens);
+        let cfg = TextRankConfig::default();
+        let cs = word_candidates(&stream, &cfg);
+
+        let builder = FocusTermsTeleportBuilder::new(
+            vec!["machine".to_string()],
+            10.0,
+        );
+        let tv = builder.build(stream.as_ref(), cs.as_ref(), &cfg).unwrap();
+
+        // Find the index of "machine" among candidates.
+        let machine_idx = cs.words().iter()
+            .position(|w| stream.pool().get(w.lemma_id) == Some("machine"))
+            .unwrap();
+        // Find any non-focus candidate index.
+        let other_idx = cs.words().iter()
+            .position(|w| stream.pool().get(w.lemma_id) != Some("machine"))
+            .unwrap();
+
+        assert!(
+            tv[machine_idx] > tv[other_idx],
+            "Focus term 'machine' should have higher teleport probability"
+        );
+    }
+
+    #[test]
+    fn test_focus_teleport_multiple_focus_terms() {
+        let tokens = rich_tokens();
+        let stream = TokenStream::from_tokens(&tokens);
+        let cfg = TextRankConfig::default();
+        let cs = word_candidates(&stream, &cfg);
+
+        let builder = FocusTermsTeleportBuilder::new(
+            vec!["machine".to_string(), "rust".to_string()],
+            5.0,
+        );
+        let tv = builder.build(stream.as_ref(), cs.as_ref(), &cfg).unwrap();
+
+        assert!(tv.is_normalized(1e-10));
+
+        // Both focus terms should have the same probability (same bias weight).
+        let machine_idx = cs.words().iter()
+            .position(|w| stream.pool().get(w.lemma_id) == Some("machine"))
+            .unwrap();
+        let rust_idx = cs.words().iter()
+            .position(|w| stream.pool().get(w.lemma_id) == Some("rust"))
+            .unwrap();
+
+        assert!(
+            (tv[machine_idx] - tv[rust_idx]).abs() < 1e-10,
+            "Both focus terms should have equal probability"
+        );
+    }
+
+    #[test]
+    fn test_focus_teleport_empty_candidates() {
+        let stream = TokenStream::from_tokens(&[]);
+        let cfg = TextRankConfig::default();
+        let cs = word_candidates(&stream, &cfg);
+
+        let builder = FocusTermsTeleportBuilder::new(
+            vec!["machine".to_string()],
+            10.0,
+        );
+        let result = builder.build(stream.as_ref(), cs.as_ref(), &cfg);
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_focus_teleport_phrase_candidates_returns_none() {
+        let tokens = vec![
+            Token::new("big", "big", PosTag::Adjective, 0, 3, 0, 0),
+            Token::new("cat", "cat", PosTag::Noun, 4, 7, 0, 1),
+        ];
+        let stream = TokenStream::from_tokens(&tokens);
+        let cfg = TextRankConfig::default();
+
+        let chunks = vec![ChunkSpan {
+            start_token: 0, end_token: 2, start_char: 0, end_char: 7, sentence_idx: 0,
+        }];
+        let cs = PhraseCandidateSelector::new(chunks).select(stream.as_ref(), &cfg);
+
+        let builder = FocusTermsTeleportBuilder::new(
+            vec!["big".to_string()],
+            10.0,
+        );
+        let result = builder.build(stream.as_ref(), cs.as_ref(), &cfg);
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_focus_teleport_no_matching_terms() {
+        let tokens = rich_tokens();
+        let stream = TokenStream::from_tokens(&tokens);
+        let cfg = TextRankConfig::default();
+        let cs = word_candidates(&stream, &cfg);
+
+        // Focus on terms not present in the document.
+        let builder = FocusTermsTeleportBuilder::new(
+            vec!["nonexistent".to_string()],
+            10.0,
+        );
+        let tv = builder.build(stream.as_ref(), cs.as_ref(), &cfg).unwrap();
+
+        // All candidates get base weight 1.0 → effectively uniform.
+        assert!(tv.is_normalized(1e-10));
+        let expected = 1.0 / cs.len() as f64;
+        for &v in tv.as_slice() {
+            assert!(
+                (v - expected).abs() < 1e-10,
+                "No matches should produce uniform distribution"
+            );
+        }
+    }
+
+    #[test]
+    fn test_focus_teleport_single_candidate_is_focus() {
+        let tokens = vec![
+            Token::new("Rust", "rust", PosTag::Noun, 0, 4, 0, 0),
+        ];
+        let stream = TokenStream::from_tokens(&tokens);
+        let cfg = TextRankConfig::default();
+        let cs = word_candidates(&stream, &cfg);
+        assert_eq!(cs.len(), 1);
+
+        let builder = FocusTermsTeleportBuilder::new(vec!["rust".to_string()], 10.0);
+        let tv = builder.build(stream.as_ref(), cs.as_ref(), &cfg).unwrap();
+
+        // Single candidate → value must be 1.0 regardless of bias.
+        assert_eq!(tv.len(), 1);
+        assert!((tv[0] - 1.0).abs() < 1e-10);
+    }
+
+    #[test]
+    fn test_focus_teleport_single_candidate_not_focus() {
+        let tokens = vec![
+            Token::new("Rust", "rust", PosTag::Noun, 0, 4, 0, 0),
+        ];
+        let stream = TokenStream::from_tokens(&tokens);
+        let cfg = TextRankConfig::default();
+        let cs = word_candidates(&stream, &cfg);
+
+        let builder = FocusTermsTeleportBuilder::new(vec!["python".to_string()], 10.0);
+        let tv = builder.build(stream.as_ref(), cs.as_ref(), &cfg).unwrap();
+
+        // Single non-focus candidate → still 1.0 after normalization.
+        assert_eq!(tv.len(), 1);
+        assert!((tv[0] - 1.0).abs() < 1e-10);
+    }
+
+    #[test]
+    fn test_focus_teleport_empty_focus_terms() {
+        let tokens = rich_tokens();
+        let stream = TokenStream::from_tokens(&tokens);
+        let cfg = TextRankConfig::default();
+        let cs = word_candidates(&stream, &cfg);
+
+        // No focus terms → all get base weight → uniform.
+        let builder = FocusTermsTeleportBuilder::new(vec![], 10.0);
+        let tv = builder.build(stream.as_ref(), cs.as_ref(), &cfg).unwrap();
+
+        assert!(tv.is_normalized(1e-10));
+        let expected = 1.0 / cs.len() as f64;
+        for &v in tv.as_slice() {
+            assert!(
+                (v - expected).abs() < 1e-10,
+                "Empty focus terms should produce uniform distribution"
+            );
+        }
+    }
+
+    #[test]
+    fn test_focus_teleport_many_candidates_normalization() {
+        // Verify normalization precision with many candidates.
+        let tokens: Vec<Token> = (0usize..50)
+            .map(|i| {
+                let name = format!("word{i}");
+                Token::new(&name, &name, PosTag::Noun, i * 10, i * 10 + 5, 0, i)
+            })
+            .collect();
+        let stream = TokenStream::from_tokens(&tokens);
+        let cfg = TextRankConfig::default();
+        let cs = word_candidates(&stream, &cfg);
+
+        let builder = FocusTermsTeleportBuilder::new(
+            vec!["word0".to_string(), "word1".to_string()],
+            20.0,
+        );
+        let tv = builder.build(stream.as_ref(), cs.as_ref(), &cfg).unwrap();
+
+        assert!(tv.is_normalized(1e-10));
+        assert_eq!(tv.len(), cs.len());
+    }
+
+    // ================================================================
     // Ranker — PageRankRanker tests
     // ================================================================
 
@@ -2178,7 +2677,7 @@ mod tests {
         let cfg = TextRankConfig::default();
 
         // Bias heavily towards the first candidate.
-        let mut tv = TeleportVector::zeros(graph.num_nodes());
+        let mut tv = TeleportVector::zeros(graph.num_nodes(), TeleportType::Focus);
         tv.set(0, 10.0);
         for i in 1..graph.num_nodes() {
             tv.set(i, 1.0);
@@ -2384,7 +2883,7 @@ mod tests {
         let (_stream, _cs, graph) = build_test_graph();
         let cfg = TextRankConfig::default();
 
-        let mut tv = TeleportVector::zeros(graph.num_nodes());
+        let mut tv = TeleportVector::zeros(graph.num_nodes(), TeleportType::Focus);
         tv.set(0, 5.0);
         tv.set(1, 1.0);
         tv.normalize();
@@ -2752,7 +3251,7 @@ mod tests {
         );
 
         // Biased ranks: heavily bias node 0.
-        let mut tv = TeleportVector::zeros(graph.num_nodes());
+        let mut tv = TeleportVector::zeros(graph.num_nodes(), TeleportType::Focus);
         if graph.num_nodes() > 0 {
             tv.set(0, 10.0);
             for i in 1..graph.num_nodes() {
@@ -3086,6 +3585,146 @@ mod tests {
             assert!(p.score > 0.0, "All phrases should have positive scores");
             assert!(!p.text.is_empty(), "All phrases should have surface text");
             assert!(p.rank > 0, "Ranks should be 1-indexed");
+        }
+    }
+
+    // ================================================================
+    // Integration tests — teleport ordering stability
+    // ================================================================
+
+    /// Tokens where "early" word and "late" word have symmetric context,
+    /// so the only differentiator is position-based teleport.
+    fn position_integration_tokens() -> Vec<Token> {
+        vec![
+            // Sentence 0: "Alpha beta gamma"
+            Token::new("Alpha", "alpha", PosTag::Noun, 0, 5, 0, 0),
+            Token::new("beta", "beta", PosTag::Noun, 6, 10, 0, 1),
+            Token::new("gamma", "gamma", PosTag::Noun, 11, 16, 0, 2),
+            // Sentence 1: "Delta beta gamma"
+            Token::new("Delta", "delta", PosTag::Noun, 18, 23, 1, 3),
+            Token::new("beta", "beta", PosTag::Noun, 24, 28, 1, 4),
+            Token::new("gamma", "gamma", PosTag::Noun, 29, 34, 1, 5),
+        ]
+    }
+
+    #[test]
+    fn test_position_pipeline_earlier_words_rank_higher() {
+        use crate::pipeline::runner::PositionRankPipeline;
+
+        let tokens = position_integration_tokens();
+        let stream = TokenStream::from_tokens(&tokens);
+        let cfg = TextRankConfig::default().with_top_n(10);
+        let mut obs = NoopObserver;
+
+        let pipeline = PositionRankPipeline::position_rank();
+        let result = pipeline.run(stream, &cfg, &mut obs);
+
+        assert!(result.converged);
+
+        // "alpha" (position 0) should rank at or above "delta" (position 3)
+        // because PositionRank biases towards earlier tokens.
+        let alpha = result.phrases.iter().find(|p| p.lemma.contains("alpha"));
+        let delta = result.phrases.iter().find(|p| p.lemma.contains("delta"));
+
+        if let (Some(a), Some(d)) = (alpha, delta) {
+            assert!(
+                a.score >= d.score,
+                "Earlier word 'alpha' (score={}) should score >= later word 'delta' (score={})",
+                a.score, d.score
+            );
+        }
+    }
+
+    #[test]
+    fn test_position_pipeline_deterministic_ordering() {
+        use crate::pipeline::runner::PositionRankPipeline;
+
+        let tokens = position_integration_tokens();
+        let cfg = TextRankConfig::default().with_top_n(10);
+
+        // Run twice and verify identical output.
+        let run = || {
+            let stream = TokenStream::from_tokens(&tokens);
+            let mut obs = NoopObserver;
+            PositionRankPipeline::position_rank().run(stream, &cfg, &mut obs)
+        };
+
+        let r1 = run();
+        let r2 = run();
+
+        assert_eq!(r1.phrases.len(), r2.phrases.len());
+        for (p1, p2) in r1.phrases.iter().zip(r2.phrases.iter()) {
+            assert_eq!(p1.lemma, p2.lemma, "Phrase ordering should be deterministic");
+            assert!(
+                (p1.score - p2.score).abs() < 1e-12,
+                "Scores should be identical across runs"
+            );
+        }
+    }
+
+    #[test]
+    fn test_focus_pipeline_boosts_target_term() {
+        use crate::pipeline::runner::BiasedTextRankPipeline;
+
+        let tokens = rich_tokens();
+        let cfg = TextRankConfig::default().with_top_n(10);
+
+        // Run with "rust" focused.
+        let stream = TokenStream::from_tokens(&tokens);
+        let mut obs = NoopObserver;
+        let focused = BiasedTextRankPipeline::biased(
+            vec!["rust".to_string()],
+            20.0,
+        ).run(stream, &cfg, &mut obs);
+
+        // Run with no focus (uniform teleport = base textrank).
+        let stream2 = TokenStream::from_tokens(&tokens);
+        let mut obs2 = NoopObserver;
+        let baseline = BaseTextRankPipeline::base_textrank()
+            .run(stream2, &cfg, &mut obs2);
+
+        // "rust" should have a higher score in the focused run.
+        let rust_focused = focused.phrases.iter()
+            .find(|p| p.lemma.contains("rust"))
+            .map(|p| p.score);
+        let rust_baseline = baseline.phrases.iter()
+            .find(|p| p.lemma.contains("rust"))
+            .map(|p| p.score);
+
+        if let (Some(f), Some(b)) = (rust_focused, rust_baseline) {
+            assert!(
+                f >= b,
+                "Focus term 'rust' should score higher with bias (focused={f}, baseline={b})"
+            );
+        }
+    }
+
+    #[test]
+    fn test_focus_pipeline_deterministic_ordering() {
+        use crate::pipeline::runner::BiasedTextRankPipeline;
+
+        let tokens = rich_tokens();
+        let cfg = TextRankConfig::default().with_top_n(10);
+
+        let run = || {
+            let stream = TokenStream::from_tokens(&tokens);
+            let mut obs = NoopObserver;
+            BiasedTextRankPipeline::biased(
+                vec!["machine".to_string()],
+                10.0,
+            ).run(stream, &cfg, &mut obs)
+        };
+
+        let r1 = run();
+        let r2 = run();
+
+        assert_eq!(r1.phrases.len(), r2.phrases.len());
+        for (p1, p2) in r1.phrases.iter().zip(r2.phrases.iter()) {
+            assert_eq!(p1.lemma, p2.lemma, "Phrase ordering should be deterministic");
+            assert!(
+                (p1.score - p2.score).abs() < 1e-12,
+                "Scores should be identical across runs"
+            );
         }
     }
 }

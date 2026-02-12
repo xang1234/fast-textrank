@@ -5,13 +5,16 @@
 //!
 //! Bias formula: weight = 1 / (position + 1)
 //! where position is the first occurrence position of the word.
+//!
+//! Internally this is BaseTextRank + [`PositionTeleportBuilder`]: the only
+//! difference from the base algorithm is the teleport (personalization)
+//! strategy.
 
-use crate::graph::builder::GraphBuilder;
-use crate::graph::csr::CsrGraph;
-use crate::pagerank::personalized::{position_based_personalization, PersonalizedPageRank};
-use crate::phrase::extraction::{ExtractionResult, PhraseExtractor};
+use crate::pipeline::artifacts::TokenStream;
+use crate::pipeline::observer::NoopObserver;
+use crate::pipeline::runner::PositionRankPipeline;
+use crate::phrase::extraction::ExtractionResult;
 use crate::types::{Phrase, TextRankConfig, Token};
-use rustc_hash::FxHashMap;
 
 /// PositionRank implementation
 #[derive(Debug)]
@@ -45,85 +48,16 @@ impl PositionRank {
 
     /// Extract keyphrases with PageRank convergence information
     pub fn extract_with_info(&self, tokens: &[Token]) -> ExtractionResult {
-        // Build graph with POS filtering
-        let include_pos = if self.config.include_pos.is_empty() {
-            None
-        } else {
-            Some(self.config.include_pos.as_slice())
-        };
-        let builder = GraphBuilder::from_tokens_with_pos(
-            tokens,
-            self.config.window_size,
-            self.config.use_edge_weights,
-            include_pos,
-            self.config.use_pos_in_nodes,
-        );
-
-        if builder.is_empty() {
-            return ExtractionResult {
-                phrases: Vec::new(),
-                converged: true,
-                iterations: 0,
-            };
-        }
-
-        let graph = CsrGraph::from_builder(&builder);
-
-        // Calculate first occurrence positions for each lemma
-        let first_positions = self.get_first_positions(tokens, &graph);
-
-        // Build personalization vector
-        let personalization = position_based_personalization(&first_positions, graph.num_nodes);
-
-        // Run personalized PageRank
-        let pagerank = PersonalizedPageRank::new()
-            .with_damping(self.config.damping)
-            .with_max_iterations(self.config.max_iterations)
-            .with_threshold(self.config.convergence_threshold)
-            .with_personalization(personalization)
-            .run(&graph);
-
-        // Extract phrases
-        let extractor = PhraseExtractor::with_config(self.config.clone());
-        let phrases = extractor.extract(tokens, &graph, &pagerank);
+        let pipeline = PositionRankPipeline::position_rank();
+        let stream = TokenStream::from_tokens(tokens);
+        let mut obs = NoopObserver;
+        let result = pipeline.run(stream, &self.config, &mut obs);
 
         ExtractionResult {
-            phrases,
-            converged: pagerank.converged,
-            iterations: pagerank.iterations,
+            phrases: result.phrases,
+            converged: result.converged,
+            iterations: result.iterations as usize,
         }
-    }
-
-    /// Get the first occurrence position for each lemma in the graph
-    fn get_first_positions(&self, tokens: &[Token], graph: &CsrGraph) -> Vec<(u32, usize)> {
-        let mut first_positions: FxHashMap<String, usize> = FxHashMap::default();
-
-        // Find first occurrence of each lemma (respecting include_pos config)
-        let include_pos = &self.config.include_pos;
-        for token in tokens.iter().filter(|t| {
-            if t.is_stopword {
-                return false;
-            }
-            if include_pos.is_empty() {
-                t.pos.is_content_word()
-            } else {
-                include_pos.contains(&t.pos)
-            }
-        }) {
-            first_positions
-                .entry(token.graph_key(self.config.use_pos_in_nodes))
-                .or_insert(token.token_idx);
-        }
-
-        // Convert to (node_id, position) pairs
-        first_positions
-            .into_iter()
-            .filter_map(|(lemma, position)| {
-                graph
-                    .get_node_by_lemma(&lemma)
-                    .map(|node_id| (node_id, position))
-            })
-            .collect()
     }
 }
 
@@ -161,38 +95,13 @@ mod tests {
     }
 
     #[test]
-    fn test_first_positions() {
+    fn test_position_rank_convergence_info() {
         let tokens = make_tokens();
-        let config = TextRankConfig::default();
-        let include_pos = if config.include_pos.is_empty() {
-            None
-        } else {
-            Some(config.include_pos.as_slice())
-        };
-        let builder = GraphBuilder::from_tokens_with_pos(
-            &tokens,
-            4,
-            true,
-            include_pos,
-            config.use_pos_in_nodes,
-        );
-        let graph = CsrGraph::from_builder(&builder);
+        let result = PositionRank::new().extract_with_info(&tokens);
 
-        let pr = PositionRank::with_config(config);
-        let first_pos = pr.get_first_positions(&tokens, &graph);
-
-        // "topic" first appears at position 1
-        let topic_key = tokens
-            .iter()
-            .find(|t| t.lemma == "topic")
-            .expect("missing topic token")
-            .graph_key(pr.config.use_pos_in_nodes);
-        let topic_node = graph.get_node_by_lemma(&topic_key);
-        if let Some(node_id) = topic_node {
-            let pos = first_pos.iter().find(|(id, _)| *id == node_id);
-            assert!(pos.is_some());
-            assert_eq!(pos.unwrap().1, 1); // First at token index 1
-        }
+        assert!(!result.phrases.is_empty());
+        assert!(result.converged);
+        assert!(result.iterations > 0);
     }
 
     #[test]
@@ -230,5 +139,10 @@ mod tests {
         if let (Some(early), Some(late)) = (early_rank, late_rank) {
             assert!(early < late);
         }
+    }
+
+    #[test]
+    fn test_position_rank_pipeline_constructs() {
+        let _pipeline = PositionRankPipeline::position_rank();
     }
 }

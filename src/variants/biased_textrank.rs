@@ -6,12 +6,16 @@
 //!
 //! Focus terms receive a higher personalization weight, biasing the random
 //! walk towards them and their neighboring nodes.
+//!
+//! Internally this is BaseTextRank + [`FocusTermsTeleportBuilder`]: the only
+//! difference from the base algorithm is the teleport (personalization)
+//! strategy.
 
-use crate::graph::builder::GraphBuilder;
-use crate::graph::csr::CsrGraph;
-use crate::pagerank::personalized::{focus_based_personalization, PersonalizedPageRank};
-use crate::phrase::extraction::{ExtractionResult, PhraseExtractor};
-use crate::types::{Phrase, PosTag, TextRankConfig, Token};
+use crate::pipeline::artifacts::TokenStream;
+use crate::pipeline::observer::NoopObserver;
+use crate::pipeline::runner::BiasedTextRankPipeline;
+use crate::phrase::extraction::ExtractionResult;
+use crate::types::{Phrase, TextRankConfig, Token};
 
 /// BiasedTextRank implementation
 #[derive(Debug)]
@@ -21,9 +25,6 @@ pub struct BiasedTextRank {
     focus_terms: Vec<String>,
     /// Weight multiplier for focus terms
     bias_weight: f64,
-    /// Cached graph and PageRank result for re-ranking
-    cached_graph: Option<CsrGraph>,
-    cached_builder: Option<GraphBuilder>,
 }
 
 impl Default for BiasedTextRank {
@@ -39,8 +40,6 @@ impl BiasedTextRank {
             config: TextRankConfig::default(),
             focus_terms: Vec::new(),
             bias_weight: 5.0,
-            cached_graph: None,
-            cached_builder: None,
         }
     }
 
@@ -50,8 +49,6 @@ impl BiasedTextRank {
             config,
             focus_terms: Vec::new(),
             bias_weight: 5.0,
-            cached_graph: None,
-            cached_builder: None,
         }
     }
 
@@ -68,121 +65,31 @@ impl BiasedTextRank {
     }
 
     /// Extract keyphrases with current focus terms
-    pub fn extract(&mut self, tokens: &[Token]) -> Vec<Phrase> {
+    pub fn extract(&self, tokens: &[Token]) -> Vec<Phrase> {
         self.extract_with_info(tokens).phrases
     }
 
     /// Extract keyphrases with PageRank convergence information
-    pub fn extract_with_info(&mut self, tokens: &[Token]) -> ExtractionResult {
-        // Build graph (cache it for re-ranking) with POS filtering
-        let include_pos = if self.config.include_pos.is_empty() {
-            None
-        } else {
-            Some(self.config.include_pos.as_slice())
-        };
-        let builder = GraphBuilder::from_tokens_with_pos(
-            tokens,
-            self.config.window_size,
-            self.config.use_edge_weights,
-            include_pos,
-            self.config.use_pos_in_nodes,
-        );
-
-        if builder.is_empty() {
-            return ExtractionResult {
-                phrases: Vec::new(),
-                converged: true,
-                iterations: 0,
-            };
-        }
-
-        let graph = CsrGraph::from_builder(&builder);
-
-        // Find focus term node IDs
-        let focus_nodes = self.focus_node_ids(&graph);
-
-        // Build personalization vector
-        let personalization =
-            focus_based_personalization(&focus_nodes, self.bias_weight, graph.num_nodes);
-
-        // Run personalized PageRank
-        let pagerank = PersonalizedPageRank::new()
-            .with_damping(self.config.damping)
-            .with_max_iterations(self.config.max_iterations)
-            .with_threshold(self.config.convergence_threshold)
-            .with_personalization(personalization)
-            .run(&graph);
-
-        // Cache for potential re-ranking
-        self.cached_graph = Some(graph.clone());
-        self.cached_builder = Some(builder);
-
-        // Extract phrases
-        let extractor = PhraseExtractor::with_config(self.config.clone());
-        let phrases = extractor.extract(tokens, &graph, &pagerank);
+    pub fn extract_with_info(&self, tokens: &[Token]) -> ExtractionResult {
+        let pipeline =
+            BiasedTextRankPipeline::biased(self.focus_terms.clone(), self.bias_weight);
+        let stream = TokenStream::from_tokens(tokens);
+        let mut obs = NoopObserver;
+        let result = pipeline.run(stream, &self.config, &mut obs);
 
         ExtractionResult {
-            phrases,
-            converged: pagerank.converged,
-            iterations: pagerank.iterations,
+            phrases: result.phrases,
+            converged: result.converged,
+            iterations: result.iterations as usize,
         }
     }
 
-    /// Change focus and re-rank without rebuilding the graph
+    /// Change focus and re-rank
     ///
-    /// This is efficient for exploring different topic focuses on the same document.
+    /// Runs a fresh pipeline with the new focus terms.
     pub fn change_focus(&mut self, new_focus: &[&str], tokens: &[Token]) -> Option<Vec<Phrase>> {
-        let graph = self.cached_graph.as_ref()?;
-
-        // Update focus terms
         self.focus_terms = new_focus.iter().map(|s| s.to_lowercase()).collect();
-
-        // Find new focus term node IDs
-        let focus_nodes = self.focus_node_ids(graph);
-
-        // Build new personalization vector
-        let personalization =
-            focus_based_personalization(&focus_nodes, self.bias_weight, graph.num_nodes);
-
-        // Re-run PageRank with new personalization
-        let pagerank = PersonalizedPageRank::new()
-            .with_damping(self.config.damping)
-            .with_max_iterations(self.config.max_iterations)
-            .with_threshold(self.config.convergence_threshold)
-            .with_personalization(personalization)
-            .run(graph);
-
-        // Extract phrases
-        let extractor = PhraseExtractor::with_config(self.config.clone());
-        Some(extractor.extract(tokens, graph, &pagerank))
-    }
-
-    fn focus_node_ids(&self, graph: &CsrGraph) -> Vec<u32> {
-        if !self.config.use_pos_in_nodes {
-            return self
-                .focus_terms
-                .iter()
-                .filter_map(|term| graph.get_node_by_lemma(term))
-                .collect();
-        }
-
-        let default_pos = [PosTag::Noun, PosTag::Adjective, PosTag::ProperNoun];
-        let pos_tags: &[PosTag] = if self.config.include_pos.is_empty() {
-            &default_pos
-        } else {
-            self.config.include_pos.as_slice()
-        };
-
-        let mut nodes = Vec::new();
-        for term in &self.focus_terms {
-            for pos in pos_tags {
-                let key = format!("{}|{}", term, pos.as_str());
-                if let Some(node_id) = graph.get_node_by_lemma(&key) {
-                    nodes.push(node_id);
-                }
-            }
-        }
-        nodes
+        Some(self.extract(tokens))
     }
 
     /// Get the current focus terms
@@ -302,5 +209,26 @@ mod tests {
         // Focus on term not in document should still work
         let phrases = extract_keyphrases_biased(&tokens, &config, &["nonexistent"], 5.0);
         assert!(!phrases.is_empty());
+    }
+
+    #[test]
+    fn test_convergence_info() {
+        let tokens = make_tokens();
+        let result = BiasedTextRank::new()
+            .with_focus(&["machine"])
+            .with_bias_weight(5.0)
+            .extract_with_info(&tokens);
+
+        assert!(!result.phrases.is_empty());
+        assert!(result.converged);
+        assert!(result.iterations > 0);
+    }
+
+    #[test]
+    fn test_biased_pipeline_constructs() {
+        let _pipeline = BiasedTextRankPipeline::biased(
+            vec!["machine".to_string()],
+            5.0,
+        );
     }
 }

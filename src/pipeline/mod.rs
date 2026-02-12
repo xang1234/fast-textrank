@@ -23,8 +23,8 @@ pub mod validation;
 pub use artifacts::{
     CandidateKind, CandidateSet, CandidateSetRef, DebugPayload, FormattedResult, Graph,
     GraphStats, PhraseCandidate, PhraseEntry, PhraseSet, PhraseSetRef, PipelineWorkspace,
-    RankDiagnostics, RankOutput, TeleportVector, TokenEntry, TokenStream, TokenStreamRef,
-    WordCandidate,
+    RankDiagnostics, RankOutput, TeleportType, TeleportVector, TokenEntry, TokenStream,
+    TokenStreamRef, WordCandidate,
 };
 
 // Re-export observer types.
@@ -35,13 +35,16 @@ pub use observer::{
 };
 
 // Re-export runner types (Pipeline, builder, type alias).
-pub use runner::{BaseTextRankPipeline, Pipeline, PipelineBuilder};
+pub use runner::{
+    BaseTextRankPipeline, BiasedTextRankPipeline, Pipeline, PipelineBuilder,
+    PositionRankPipeline,
+};
 
 // Re-export stage traits and default implementations.
 pub use traits::{
     CandidateSelector, ChunkPhraseBuilder, CooccurrenceGraphBuilder, EdgeWeightPolicy,
-    GraphBuilder, GraphTransform, NoopGraphTransform, NoopPreprocessor, PageRankRanker,
-    PhraseBuilder, PhraseCandidateSelector, Preprocessor, Ranker, ResultFormatter,
-    StandardResultFormatter, TeleportBuilder, UniformTeleportBuilder, WindowStrategy,
-    WordNodeSelector,
+    FocusTermsTeleportBuilder, GraphBuilder, GraphTransform, NoopGraphTransform,
+    NoopPreprocessor, PageRankRanker, PhraseBuilder, PhraseCandidateSelector,
+    PositionTeleportBuilder, Preprocessor, Ranker, ResultFormatter, StandardResultFormatter,
+    TeleportBuilder, UniformTeleportBuilder, WindowStrategy, WordNodeSelector,
 };

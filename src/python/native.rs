@@ -404,7 +404,7 @@ impl PyBiasedTextRank {
         }
 
         let focus_refs: Vec<&str> = self.focus_terms.iter().map(|s| s.as_str()).collect();
-        let mut extractor = BiasedTextRank::with_config(self.config.clone())
+        let extractor = BiasedTextRank::with_config(self.config.clone())
             .with_focus(&focus_refs)
             .with_bias_weight(self.bias_weight);
 
