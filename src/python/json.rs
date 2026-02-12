@@ -345,12 +345,12 @@ pub fn validate_spec_impl(spec: &PipelineSpec) -> ValidationResponse {
 ///     JSON string with extracted phrases, or a validation report
 #[pyfunction]
 #[pyo3(signature = (json_input))]
-pub fn extract_from_json(json_input: &str) -> PyResult<String> {
-    // Parse input
+pub fn extract_from_json(py: Python<'_>, json_input: &str) -> PyResult<String> {
+    // Parse input (cheap — no need to release GIL)
     let doc: JsonDocument = serde_json::from_str(json_input)
         .map_err(|e| pyo3::exceptions::PyValueError::new_err(format!("Invalid JSON: {}", e)))?;
 
-    // Handle validate-only mode
+    // Handle validate-only mode (fast path, no extraction)
     if doc.validate_only {
         let pipeline_value = doc.pipeline.ok_or_else(|| {
             pyo3::exceptions::PyValueError::new_err(
@@ -389,9 +389,12 @@ pub fn extract_from_json(json_input: &str) -> PyResult<String> {
         }
     }
 
-    let extraction = extract_with_variant(&tokens, &config, &json_config, variant);
+    // Release the GIL for CPU-intensive extraction.
+    let extraction = py.allow_threads(move || {
+        extract_with_variant(&tokens, &config, &json_config, variant)
+    });
 
-    // Build result
+    // Build result (cheap serialization)
     let result = JsonResult {
         phrases: extraction
             .phrases
@@ -439,55 +442,57 @@ pub fn validate_pipeline_spec(json_spec: &str) -> PyResult<String> {
 ///     JSON string with array of results
 #[pyfunction]
 #[pyo3(signature = (json_input))]
-pub fn extract_batch_from_json(json_input: &str) -> PyResult<String> {
-    // Parse input as array
+pub fn extract_batch_from_json(py: Python<'_>, json_input: &str) -> PyResult<String> {
+    // Parse input as array (cheap — no need to release GIL)
     let docs: Vec<JsonDocument> = serde_json::from_str(json_input)
         .map_err(|e| pyo3::exceptions::PyValueError::new_err(format!("Invalid JSON: {}", e)))?;
 
-    // Process each document
-    let results: Vec<JsonResult> = docs
-        .into_iter()
-        .map(|doc| {
-            let json_config = doc.config.unwrap_or_default();
-            let config: TextRankConfig = json_config.clone().into();
-            let variant = doc
-                .variant
-                .as_deref()
-                .and_then(|value| value.parse().ok())
-                .unwrap_or(Variant::TextRank);
-            let mut tokens: Vec<Token> = doc.tokens.into_iter().map(Token::from).collect();
+    // Release the GIL for the entire batch of CPU-intensive extractions.
+    let results: Vec<JsonResult> = py.allow_threads(move || {
+        docs.into_iter()
+            .map(|doc| {
+                let json_config = doc.config.unwrap_or_default();
+                let config: TextRankConfig = json_config.clone().into();
+                let variant = doc
+                    .variant
+                    .as_deref()
+                    .and_then(|value| value.parse().ok())
+                    .unwrap_or(Variant::TextRank);
+                let mut tokens: Vec<Token> = doc.tokens.into_iter().map(Token::from).collect();
 
-            if !config.stopwords.is_empty() {
-                let stopwords = crate::nlp::stopwords::StopwordFilter::with_additional(
-                    &config.language,
-                    &config.stopwords,
-                );
-                for token in &mut tokens {
-                    if stopwords.is_stopword(&token.text) {
-                        token.is_stopword = true;
+                if !config.stopwords.is_empty() {
+                    let stopwords = crate::nlp::stopwords::StopwordFilter::with_additional(
+                        &config.language,
+                        &config.stopwords,
+                    );
+                    for token in &mut tokens {
+                        if stopwords.is_stopword(&token.text) {
+                            token.is_stopword = true;
+                        }
                     }
                 }
-            }
 
-            let extraction = extract_with_variant(&tokens, &config, &json_config, variant);
+                let extraction =
+                    extract_with_variant(&tokens, &config, &json_config, variant);
 
-            JsonResult {
-                phrases: extraction
-                    .phrases
-                    .into_iter()
-                    .map(|p| JsonPhrase {
-                        text: p.text,
-                        lemma: p.lemma,
-                        score: p.score,
-                        count: p.count,
-                        rank: p.rank,
-                    })
-                    .collect(),
-                converged: extraction.converged,
-                iterations: extraction.iterations,
-            }
-        })
-        .collect();
+                JsonResult {
+                    phrases: extraction
+                        .phrases
+                        .into_iter()
+                        .map(|p| JsonPhrase {
+                            text: p.text,
+                            lemma: p.lemma,
+                            score: p.score,
+                            count: p.count,
+                            rank: p.rank,
+                        })
+                        .collect(),
+                    converged: extraction.converged,
+                    iterations: extraction.iterations,
+                }
+            })
+            .collect()
+    });
 
     serde_json::to_string(&results)
         .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))

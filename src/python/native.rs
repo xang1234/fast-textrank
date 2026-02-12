@@ -258,23 +258,26 @@ impl PyBaseTextRank {
     /// For best results with large documents, use the JSON interface
     /// with pre-tokenized data from spaCy.
     #[pyo3(signature = (text))]
-    fn extract_keywords(&self, text: &str) -> PyResult<PyTextRankResult> {
-        // Tokenize
-        let tokenizer = Tokenizer::new();
-        let (_sentences, mut tokens) = tokenizer.tokenize(text);
+    fn extract_keywords(&self, py: Python<'_>, text: &str) -> PyResult<PyTextRankResult> {
+        let config = self.config.clone();
+        let text = text.to_owned();
 
-        // Apply stopword filter
-        let stopwords = if self.config.stopwords.is_empty() {
-            StopwordFilter::new(&self.config.language)
-        } else {
-            StopwordFilter::with_additional(&self.config.language, &self.config.stopwords)
-        };
-        for token in &mut tokens {
-            token.is_stopword = stopwords.is_stopword(&token.text);
-        }
+        // Release the GIL for CPU-intensive extraction.
+        let result = py.allow_threads(move || {
+            let tokenizer = Tokenizer::new();
+            let (_sentences, mut tokens) = tokenizer.tokenize(&text);
 
-        // Extract phrases with convergence info
-        let result = extract_keyphrases_with_info(&tokens, &self.config);
+            let stopwords = if config.stopwords.is_empty() {
+                StopwordFilter::new(&config.language)
+            } else {
+                StopwordFilter::with_additional(&config.language, &config.stopwords)
+            };
+            for token in &mut tokens {
+                token.is_stopword = stopwords.is_stopword(&token.text);
+            }
+
+            extract_keyphrases_with_info(&tokens, &config)
+        });
 
         Ok(PyTextRankResult {
             phrases: result.phrases.into_iter().map(PyPhrase::from).collect(),
@@ -322,21 +325,25 @@ impl PyPositionRank {
 
     /// Extract keywords using PositionRank
     #[pyo3(signature = (text))]
-    fn extract_keywords(&self, text: &str) -> PyResult<PyTextRankResult> {
-        let tokenizer = Tokenizer::new();
-        let (_, mut tokens) = tokenizer.tokenize(text);
+    fn extract_keywords(&self, py: Python<'_>, text: &str) -> PyResult<PyTextRankResult> {
+        let config = self.config.clone();
+        let text = text.to_owned();
 
-        let stopwords = if self.config.stopwords.is_empty() {
-            StopwordFilter::new(&self.config.language)
-        } else {
-            StopwordFilter::with_additional(&self.config.language, &self.config.stopwords)
-        };
-        for token in &mut tokens {
-            token.is_stopword = stopwords.is_stopword(&token.text);
-        }
+        let result = py.allow_threads(move || {
+            let tokenizer = Tokenizer::new();
+            let (_, mut tokens) = tokenizer.tokenize(&text);
 
-        let extractor = PositionRank::with_config(self.config.clone());
-        let result = extractor.extract_with_info(&tokens);
+            let stopwords = if config.stopwords.is_empty() {
+                StopwordFilter::new(&config.language)
+            } else {
+                StopwordFilter::with_additional(&config.language, &config.stopwords)
+            };
+            for token in &mut tokens {
+                token.is_stopword = stopwords.is_stopword(&token.text);
+            }
+
+            PositionRank::with_config(config).extract_with_info(&tokens)
+        });
 
         Ok(PyTextRankResult {
             phrases: result.phrases.into_iter().map(PyPhrase::from).collect(),
@@ -397,6 +404,7 @@ impl PyBiasedTextRank {
     #[pyo3(signature = (text, focus_terms=None))]
     fn extract_keywords(
         &mut self,
+        py: Python<'_>,
         text: &str,
         focus_terms: Option<Vec<String>>,
     ) -> PyResult<PyTextRankResult> {
@@ -405,24 +413,30 @@ impl PyBiasedTextRank {
             self.focus_terms = terms;
         }
 
-        let tokenizer = Tokenizer::new();
-        let (_, mut tokens) = tokenizer.tokenize(text);
+        let config = self.config.clone();
+        let text = text.to_owned();
+        let focus_terms = self.focus_terms.clone();
+        let bias_weight = self.bias_weight;
 
-        let stopwords = if self.config.stopwords.is_empty() {
-            StopwordFilter::new(&self.config.language)
-        } else {
-            StopwordFilter::with_additional(&self.config.language, &self.config.stopwords)
-        };
-        for token in &mut tokens {
-            token.is_stopword = stopwords.is_stopword(&token.text);
-        }
+        let result = py.allow_threads(move || {
+            let tokenizer = Tokenizer::new();
+            let (_, mut tokens) = tokenizer.tokenize(&text);
 
-        let focus_refs: Vec<&str> = self.focus_terms.iter().map(|s| s.as_str()).collect();
-        let extractor = BiasedTextRank::with_config(self.config.clone())
-            .with_focus(&focus_refs)
-            .with_bias_weight(self.bias_weight);
+            let stopwords = if config.stopwords.is_empty() {
+                StopwordFilter::new(&config.language)
+            } else {
+                StopwordFilter::with_additional(&config.language, &config.stopwords)
+            };
+            for token in &mut tokens {
+                token.is_stopword = stopwords.is_stopword(&token.text);
+            }
 
-        let result = extractor.extract_with_info(&tokens);
+            let focus_refs: Vec<&str> = focus_terms.iter().map(|s| s.as_str()).collect();
+            BiasedTextRank::with_config(config)
+                .with_focus(&focus_refs)
+                .with_bias_weight(bias_weight)
+                .extract_with_info(&tokens)
+        });
 
         Ok(PyTextRankResult {
             phrases: result.phrases.into_iter().map(PyPhrase::from).collect(),
@@ -473,21 +487,25 @@ impl PySingleRank {
 
     /// Extract keywords using SingleRank
     #[pyo3(signature = (text))]
-    fn extract_keywords(&self, text: &str) -> PyResult<PyTextRankResult> {
-        let tokenizer = Tokenizer::new();
-        let (_, mut tokens) = tokenizer.tokenize(text);
+    fn extract_keywords(&self, py: Python<'_>, text: &str) -> PyResult<PyTextRankResult> {
+        let config = self.config.clone();
+        let text = text.to_owned();
 
-        let stopwords = if self.config.stopwords.is_empty() {
-            StopwordFilter::new(&self.config.language)
-        } else {
-            StopwordFilter::with_additional(&self.config.language, &self.config.stopwords)
-        };
-        for token in &mut tokens {
-            token.is_stopword = stopwords.is_stopword(&token.text);
-        }
+        let result = py.allow_threads(move || {
+            let tokenizer = Tokenizer::new();
+            let (_, mut tokens) = tokenizer.tokenize(&text);
 
-        let extractor = SingleRank::with_config(self.config.clone());
-        let result = extractor.extract_with_info(&tokens);
+            let stopwords = if config.stopwords.is_empty() {
+                StopwordFilter::new(&config.language)
+            } else {
+                StopwordFilter::with_additional(&config.language, &config.stopwords)
+            };
+            for token in &mut tokens {
+                token.is_stopword = stopwords.is_stopword(&token.text);
+            }
+
+            SingleRank::with_config(config).extract_with_info(&tokens)
+        });
 
         Ok(PyTextRankResult {
             phrases: result.phrases.into_iter().map(PyPhrase::from).collect(),
@@ -552,6 +570,7 @@ impl PyTopicalPageRank {
     #[pyo3(signature = (text, topic_weights=None))]
     fn extract_keywords(
         &mut self,
+        py: Python<'_>,
         text: &str,
         topic_weights: Option<HashMap<String, f64>>,
     ) -> PyResult<PyTextRankResult> {
@@ -559,23 +578,29 @@ impl PyTopicalPageRank {
             self.topic_weights = weights;
         }
 
-        let tokenizer = Tokenizer::new();
-        let (_, mut tokens) = tokenizer.tokenize(text);
+        let config = self.config.clone();
+        let text = text.to_owned();
+        let topic_weights = self.topic_weights.clone();
+        let min_weight = self.min_weight;
 
-        let stopwords = if self.config.stopwords.is_empty() {
-            StopwordFilter::new(&self.config.language)
-        } else {
-            StopwordFilter::with_additional(&self.config.language, &self.config.stopwords)
-        };
-        for token in &mut tokens {
-            token.is_stopword = stopwords.is_stopword(&token.text);
-        }
+        let result = py.allow_threads(move || {
+            let tokenizer = Tokenizer::new();
+            let (_, mut tokens) = tokenizer.tokenize(&text);
 
-        let extractor = TopicalPageRank::with_config(self.config.clone())
-            .with_topic_weights(self.topic_weights.clone())
-            .with_min_weight(self.min_weight);
+            let stopwords = if config.stopwords.is_empty() {
+                StopwordFilter::new(&config.language)
+            } else {
+                StopwordFilter::with_additional(&config.language, &config.stopwords)
+            };
+            for token in &mut tokens {
+                token.is_stopword = stopwords.is_stopword(&token.text);
+            }
 
-        let result = extractor.extract_with_info(&tokens);
+            TopicalPageRank::with_config(config)
+                .with_topic_weights(topic_weights)
+                .with_min_weight(min_weight)
+                .extract_with_info(&tokens)
+        });
 
         Ok(PyTextRankResult {
             phrases: result.phrases.into_iter().map(PyPhrase::from).collect(),
@@ -635,24 +660,30 @@ impl PyMultipartiteRank {
 
     /// Extract keywords using MultipartiteRank
     #[pyo3(signature = (text))]
-    fn extract_keywords(&self, text: &str) -> PyResult<PyTextRankResult> {
-        let tokenizer = Tokenizer::new();
-        let (_, mut tokens) = tokenizer.tokenize(text);
+    fn extract_keywords(&self, py: Python<'_>, text: &str) -> PyResult<PyTextRankResult> {
+        let config = self.config.clone();
+        let text = text.to_owned();
+        let similarity_threshold = self.similarity_threshold;
+        let alpha = self.alpha;
 
-        let stopwords = if self.config.stopwords.is_empty() {
-            StopwordFilter::new(&self.config.language)
-        } else {
-            StopwordFilter::with_additional(&self.config.language, &self.config.stopwords)
-        };
-        for token in &mut tokens {
-            token.is_stopword = stopwords.is_stopword(&token.text);
-        }
+        let result = py.allow_threads(move || {
+            let tokenizer = Tokenizer::new();
+            let (_, mut tokens) = tokenizer.tokenize(&text);
 
-        let extractor = MultipartiteRank::with_config(self.config.clone())
-            .with_similarity_threshold(self.similarity_threshold)
-            .with_alpha(self.alpha);
+            let stopwords = if config.stopwords.is_empty() {
+                StopwordFilter::new(&config.language)
+            } else {
+                StopwordFilter::with_additional(&config.language, &config.stopwords)
+            };
+            for token in &mut tokens {
+                token.is_stopword = stopwords.is_stopword(&token.text);
+            }
 
-        let result = extractor.extract_with_info(&tokens);
+            MultipartiteRank::with_config(config)
+                .with_similarity_threshold(similarity_threshold)
+                .with_alpha(alpha)
+                .extract_with_info(&tokens)
+        });
 
         Ok(PyTextRankResult {
             phrases: result.phrases.into_iter().map(PyPhrase::from).collect(),
