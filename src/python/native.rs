@@ -131,7 +131,8 @@ impl PyTextRankConfig {
         include_pos=None,
         stopwords=None,
         use_pos_in_nodes=true,
-        phrase_grouping="scrubbed_text"
+        phrase_grouping="scrubbed_text",
+        determinism="default"
     ))]
     #[allow(clippy::too_many_arguments)]
     fn new(
@@ -149,6 +150,7 @@ impl PyTextRankConfig {
         stopwords: Option<Vec<String>>,
         use_pos_in_nodes: bool,
         phrase_grouping: &str,
+        determinism: &str,
     ) -> PyResult<Self> {
         let aggregation = match score_aggregation.to_lowercase().as_str() {
             "sum" => ScoreAggregation::Sum,
@@ -177,6 +179,17 @@ impl PyTextRankConfig {
             ],
         };
 
+        let det_mode = match determinism.to_lowercase().as_str() {
+            "deterministic" => crate::types::DeterminismMode::Deterministic,
+            "default" => crate::types::DeterminismMode::Default,
+            _ => {
+                return Err(pyo3::exceptions::PyValueError::new_err(format!(
+                    "Unknown determinism mode: {}. Use 'default' or 'deterministic'",
+                    determinism
+                )))
+            }
+        };
+
         let config = TextRankConfig {
             damping,
             max_iterations,
@@ -192,6 +205,7 @@ impl PyTextRankConfig {
             stopwords: stopwords.unwrap_or_default(),
             use_pos_in_nodes,
             phrase_grouping: phrase_grouping.parse().unwrap_or(PhraseGrouping::Lemma),
+            determinism: det_mode,
         };
 
         config

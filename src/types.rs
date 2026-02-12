@@ -420,6 +420,42 @@ impl ScoreAggregation {
 }
 
 // ============================================================================
+// Determinism Mode
+// ============================================================================
+
+/// Controls whether pipeline execution prioritizes speed or reproducibility.
+///
+/// By default the library uses the fastest available code path, which may
+/// include parallel reductions, non-deterministic hash iteration order, and
+/// floating-point summation order that varies across runs. Setting
+/// `Deterministic` forces every stage to use stable ordering and
+/// deterministic reductions so that the same input always produces the
+/// same output, at a potential throughput cost.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DeterminismMode {
+    /// Fastest execution — parallel reductions and non-deterministic
+    /// iteration order are permitted.
+    #[default]
+    Default,
+    /// Stable, reproducible results across runs and machines.
+    ///
+    /// When active, stages must:
+    /// - use sorted keys instead of hash-map iteration order,
+    /// - build CSR graphs in a stable order,
+    /// - apply deterministic reductions,
+    /// - use the stable tie-breaker comparator for final ranking.
+    Deterministic,
+}
+
+impl DeterminismMode {
+    /// Returns `true` when deterministic execution is requested.
+    pub fn is_deterministic(self) -> bool {
+        matches!(self, DeterminismMode::Deterministic)
+    }
+}
+
+// ============================================================================
 // Configuration
 // ============================================================================
 
@@ -455,6 +491,9 @@ pub struct TextRankConfig {
     pub use_pos_in_nodes: bool,
     /// How to group phrase variants
     pub phrase_grouping: PhraseGrouping,
+    /// Determinism mode (default: fastest; opt-in: reproducible)
+    #[serde(default)]
+    pub determinism: DeterminismMode,
 }
 
 impl Default for TextRankConfig {
@@ -479,6 +518,7 @@ impl Default for TextRankConfig {
             stopwords: Vec::new(),
             use_pos_in_nodes: true,
             phrase_grouping: PhraseGrouping::ScrubbedText,
+            determinism: DeterminismMode::Default,
         }
     }
 }
@@ -568,6 +608,12 @@ impl TextRankConfig {
         self.score_aggregation = aggregation;
         self
     }
+
+    /// Builder method: set determinism mode
+    pub fn with_determinism(mut self, mode: DeterminismMode) -> Self {
+        self.determinism = mode;
+        self
+    }
 }
 
 #[cfg(test)]
@@ -611,6 +657,93 @@ mod tests {
 
         let bad_config = TextRankConfig::default().with_window_size(1);
         assert!(bad_config.validate().is_err());
+    }
+
+    #[test]
+    fn test_determinism_mode_default() {
+        let mode = DeterminismMode::default();
+        assert_eq!(mode, DeterminismMode::Default);
+        assert!(!mode.is_deterministic());
+    }
+
+    #[test]
+    fn test_determinism_mode_deterministic() {
+        let mode = DeterminismMode::Deterministic;
+        assert!(mode.is_deterministic());
+    }
+
+    #[test]
+    fn test_determinism_mode_serde_roundtrip() {
+        // Default variant serializes as "default"
+        let json = serde_json::to_string(&DeterminismMode::Default).unwrap();
+        assert_eq!(json, r#""default""#);
+        let back: DeterminismMode = serde_json::from_str(&json).unwrap();
+        assert_eq!(back, DeterminismMode::Default);
+
+        // Deterministic variant serializes as "deterministic"
+        let json = serde_json::to_string(&DeterminismMode::Deterministic).unwrap();
+        assert_eq!(json, r#""deterministic""#);
+        let back: DeterminismMode = serde_json::from_str(&json).unwrap();
+        assert_eq!(back, DeterminismMode::Deterministic);
+    }
+
+    #[test]
+    fn test_config_determinism_default() {
+        let cfg = TextRankConfig::default();
+        assert_eq!(cfg.determinism, DeterminismMode::Default);
+        assert!(!cfg.determinism.is_deterministic());
+    }
+
+    #[test]
+    fn test_config_with_determinism_builder() {
+        let cfg = TextRankConfig::default().with_determinism(DeterminismMode::Deterministic);
+        assert!(cfg.determinism.is_deterministic());
+    }
+
+    #[test]
+    fn test_config_serde_missing_determinism_defaults() {
+        // Simulates deserializing an old config without the "determinism" field.
+        let json = r#"{
+            "damping": 0.85,
+            "max_iterations": 100,
+            "convergence_threshold": 1e-6,
+            "window_size": 3,
+            "top_n": 10,
+            "min_phrase_length": 1,
+            "max_phrase_length": 4,
+            "score_aggregation": "Sum",
+            "language": "en",
+            "use_edge_weights": true,
+            "include_pos": ["Noun"],
+            "stopwords": [],
+            "use_pos_in_nodes": true,
+            "phrase_grouping": "Lemma"
+        }"#;
+        let cfg: TextRankConfig = serde_json::from_str(json).unwrap();
+        assert_eq!(cfg.determinism, DeterminismMode::Default);
+    }
+
+    #[test]
+    fn test_config_serde_with_determinism() {
+        let json = r#"{
+            "damping": 0.85,
+            "max_iterations": 100,
+            "convergence_threshold": 1e-6,
+            "window_size": 3,
+            "top_n": 10,
+            "min_phrase_length": 1,
+            "max_phrase_length": 4,
+            "score_aggregation": "Sum",
+            "language": "en",
+            "use_edge_weights": true,
+            "include_pos": ["Noun"],
+            "stopwords": [],
+            "use_pos_in_nodes": true,
+            "phrase_grouping": "Lemma",
+            "determinism": "deterministic"
+        }"#;
+        let cfg: TextRankConfig = serde_json::from_str(json).unwrap();
+        assert!(cfg.determinism.is_deterministic());
     }
 
     #[test]

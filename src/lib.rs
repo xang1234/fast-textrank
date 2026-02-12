@@ -29,7 +29,8 @@ pub mod python;
 // Re-export commonly used types
 pub use errors::{Result, TextRankError};
 pub use types::{
-    ChunkSpan, LemmaId, Phrase, ScoreAggregation, Sentence, StringPool, TextRankConfig, Token,
+    ChunkSpan, DeterminismMode, LemmaId, Phrase, ScoreAggregation, Sentence, StringPool,
+    TextRankConfig, Token,
 };
 
 // Re-export main functionality

@@ -6,7 +6,7 @@
 use crate::phrase::extraction::extract_keyphrases_with_info;
 use crate::pipeline::spec::PipelineSpec;
 use crate::pipeline::validation::{ValidationEngine, ValidationReport};
-use crate::types::{PhraseGrouping, PosTag, ScoreAggregation, TextRankConfig, Token};
+use crate::types::{DeterminismMode, PhraseGrouping, PosTag, ScoreAggregation, TextRankConfig, Token};
 use crate::variants::biased_textrank::BiasedTextRank;
 use crate::variants::multipartite_rank::MultipartiteRank;
 use crate::variants::position_rank::PositionRank;
@@ -119,6 +119,9 @@ pub struct JsonConfig {
     /// Similarity threshold for MultipartiteRank clustering (default 0.26)
     #[serde(default = "default_multipartite_similarity_threshold")]
     pub multipartite_similarity_threshold: f64,
+    /// Determinism mode: "default" (fastest) or "deterministic" (reproducible)
+    #[serde(default)]
+    pub determinism: String,
 }
 
 fn default_use_edge_weights() -> bool {
@@ -201,6 +204,7 @@ impl Default for JsonConfig {
             topic_min_weight: 0.0,
             multipartite_alpha: default_multipartite_alpha(),
             multipartite_similarity_threshold: default_multipartite_similarity_threshold(),
+            determinism: String::new(),
         }
     }
 }
@@ -244,6 +248,10 @@ impl From<JsonConfig> for TextRankConfig {
             stopwords: jc.stopwords,
             use_pos_in_nodes: jc.use_pos_in_nodes,
             phrase_grouping: jc.phrase_grouping.parse().unwrap_or(PhraseGrouping::Lemma),
+            determinism: match jc.determinism.to_lowercase().as_str() {
+                "deterministic" => DeterminismMode::Deterministic,
+                _ => DeterminismMode::Default,
+            },
         }
     }
 }
