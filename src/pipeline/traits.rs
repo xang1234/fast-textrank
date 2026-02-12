@@ -850,6 +850,180 @@ impl GraphTransform for AlphaBoostWeighter {
     }
 }
 
+/// Combined graph transform for MultipartiteRank: intra-cluster edge removal
+/// followed by alpha-boost weighting in a single pass.
+///
+/// MultipartiteRank (Boudin, NAACL 2018) requires two sequential graph
+/// modifications that the pipeline's single `GT: GraphTransform` slot must
+/// handle together:
+///
+/// 1. **Phase 1 — Zero intra-cluster edges**: For each node, zeros weights to
+///    same-cluster neighbours, forming the k-partite graph structure.
+/// 2. **Phase 2 — Alpha boost**: For each multi-member cluster, boosts edges
+///    toward the first-occurring variant by `alpha * exp(1/(1+p)) * booster_sum`.
+/// 3. **Phase 3 — Recompute** `out_degree` and `total_weight` once at end.
+///
+/// Reads [`ClusterAssignments`] from `graph.cluster_assignments()`.  If
+/// assignments are missing and candidates are non-empty, this is a wiring bug
+/// and will panic.
+///
+/// # Construction
+///
+/// - [`MultipartiteTransform::new()`] — default alpha = 1.1
+/// - [`MultipartiteTransform::with_alpha(f64)`] — custom alpha
+#[derive(Debug, Clone)]
+pub struct MultipartiteTransform {
+    /// Boost scaling factor (default: 1.1).
+    pub alpha: f64,
+}
+
+impl MultipartiteTransform {
+    /// Create with default alpha (1.1).
+    pub fn new() -> Self {
+        Self { alpha: 1.1 }
+    }
+
+    /// Create with custom alpha.
+    pub fn with_alpha(alpha: f64) -> Self {
+        Self { alpha }
+    }
+}
+
+impl Default for MultipartiteTransform {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl GraphTransform for MultipartiteTransform {
+    fn transform(
+        &self,
+        graph: &mut Graph,
+        _tokens: TokenStreamRef<'_>,
+        candidates: CandidateSetRef<'_>,
+        _cfg: &TextRankConfig,
+    ) {
+        let n = graph.num_nodes();
+        if n == 0 {
+            return;
+        }
+
+        // Clone assignments out to release the immutable borrow on `graph`.
+        let assignments = match graph.cluster_assignments() {
+            Some(a) => a.clone(),
+            None => {
+                if !candidates.is_empty() {
+                    panic!(
+                        "MultipartiteTransform requires cluster_assignments in Graph \
+                         (wiring bug: {} candidates but no assignments)",
+                        candidates.len()
+                    );
+                }
+                return;
+            }
+        };
+
+        assert_eq!(
+            assignments.num_candidates(),
+            n,
+            "MultipartiteTransform: cluster assignments length ({}) != graph node count ({})",
+            assignments.num_candidates(),
+            n,
+        );
+
+        let csr = graph.csr_mut();
+
+        // --- Phase 1: Zero intra-cluster edges ---
+        for node in 0..n {
+            let cluster = assignments.cluster_of(node);
+            let start = csr.row_ptr[node];
+            let end = csr.row_ptr[node + 1];
+
+            for idx in start..end {
+                let neighbor = csr.col_idx[idx] as usize;
+                if assignments.cluster_of(neighbor) == cluster {
+                    csr.weights[idx] = 0.0;
+                }
+            }
+        }
+
+        // --- Phase 2: Alpha boost (if alpha > 0) ---
+        if self.alpha > 0.0 {
+            let phrases = candidates.phrases();
+            let num_clusters = assignments.num_clusters();
+
+            for cluster_id in 0..num_clusters {
+                let members = assignments.members_of(cluster_id);
+                if members.len() <= 1 {
+                    continue;
+                }
+
+                // Find the first-occurring variant (lowest start_token).
+                let first_idx = *members
+                    .iter()
+                    .min_by_key(|&&idx| phrases[idx].start_token)
+                    .unwrap();
+
+                let p_first = phrases[first_idx].start_token;
+                let position_factor = (1.0 / (1.0 + p_first as f64)).exp();
+
+                // For each external node c_j (different cluster), accumulate
+                // booster weights from non-first variants.
+                for c_j in 0..n {
+                    if assignments.cluster_of(c_j) == cluster_id {
+                        continue;
+                    }
+
+                    let mut booster_sum = 0.0;
+                    for &v in &members {
+                        if v == first_idx {
+                            continue;
+                        }
+                        let start = csr.row_ptr[v];
+                        let end = csr.row_ptr[v + 1];
+                        for idx in start..end {
+                            if csr.col_idx[idx] == c_j as u32 {
+                                booster_sum += csr.weights[idx];
+                                break;
+                            }
+                        }
+                    }
+
+                    if booster_sum > 0.0 {
+                        let boost = self.alpha * position_factor * booster_sum;
+                        let start = csr.row_ptr[c_j];
+                        let end = csr.row_ptr[c_j + 1];
+                        for idx in start..end {
+                            if csr.col_idx[idx] == first_idx as u32 {
+                                csr.weights[idx] += boost;
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // --- Phase 3: Recompute out_degree and total_weight ---
+        for node in 0..n {
+            let start = csr.row_ptr[node];
+            let end = csr.row_ptr[node + 1];
+
+            let mut degree = 0u32;
+            let mut total = 0.0f64;
+            for idx in start..end {
+                let w = csr.weights[idx];
+                if w > 0.0 {
+                    degree += 1;
+                    total += w;
+                }
+            }
+            csr.out_degree[node] = degree;
+            csr.total_weight[node] = total;
+        }
+    }
+}
+
 // ============================================================================
 // Clusterer — topic clustering of phrase candidates (stage 1a)
 // ============================================================================
@@ -1661,6 +1835,93 @@ impl<C: Clusterer> GraphBuilder for TopicGraphBuilder<C> {
 }
 
 // ============================================================================
+// CandidateGraphBuilder — complete candidate graph (stage 2, multipartite)
+// ============================================================================
+
+/// Builds a complete graph with individual phrase candidates as nodes.
+///
+/// Used by MultipartiteRank where, unlike TopicRank, graph nodes represent
+/// individual phrase candidates (not clusters).  The builder:
+///
+/// 1. Clusters candidates via the embedded `C: Clusterer`.
+/// 2. Creates one graph node per candidate.
+/// 3. Builds a **complete** graph: all candidate pairs get edges, weighted
+///    by `1 / compute_gap(a, b)`.  Intra-cluster edges are included here
+///    (they'll be zeroed later by [`MultipartiteTransform`]).
+/// 4. Attaches the [`ClusterAssignments`] to the graph for downstream use.
+///
+/// # Type parameter
+///
+/// - `C`: the clustering implementation — defaults to [`JaccardHacClusterer`].
+#[derive(Debug, Clone)]
+pub struct CandidateGraphBuilder<C = JaccardHacClusterer> {
+    clusterer: C,
+}
+
+impl<C: Clusterer> CandidateGraphBuilder<C> {
+    /// Create with the given clusterer.
+    pub fn new(clusterer: C) -> Self {
+        Self { clusterer }
+    }
+}
+
+impl<C: Clusterer> GraphBuilder for CandidateGraphBuilder<C> {
+    fn build(
+        &self,
+        _tokens: TokenStreamRef<'_>,
+        candidates: CandidateSetRef<'_>,
+        cfg: &TextRankConfig,
+    ) -> Graph {
+        use crate::clustering::compute_gap;
+        use crate::types::ChunkSpan;
+
+        let phrases = candidates.phrases();
+        if phrases.is_empty() {
+            return Graph::empty();
+        }
+
+        // --- 1. Cluster phrase candidates ---
+        let assignments = self.clusterer.cluster(candidates, cfg);
+
+        let n = phrases.len();
+
+        // --- 2. Create one node per candidate ---
+        let mut builder = crate::graph::builder::GraphBuilder::with_capacity(n);
+        for i in 0..n {
+            builder.get_or_create_node(&format!("c_{}", i));
+        }
+
+        // --- 3. Build complete graph (all pairs) ---
+        for i in 0..n {
+            for j in (i + 1)..n {
+                let gap = compute_gap(
+                    &ChunkSpan {
+                        start_token: phrases[i].start_token as usize,
+                        end_token: phrases[i].end_token as usize,
+                        start_char: phrases[i].start_char as usize,
+                        end_char: phrases[i].end_char as usize,
+                        sentence_idx: phrases[i].sentence_idx as usize,
+                    },
+                    &ChunkSpan {
+                        start_token: phrases[j].start_token as usize,
+                        end_token: phrases[j].end_token as usize,
+                        start_char: phrases[j].start_char as usize,
+                        end_char: phrases[j].end_char as usize,
+                        sentence_idx: phrases[j].sentence_idx as usize,
+                    },
+                );
+                builder.increment_edge(i as u32, j as u32, 1.0 / gap as f64);
+            }
+        }
+
+        // --- 4. Wrap and attach assignments ---
+        let mut graph = Graph::from_builder(&builder);
+        graph.set_cluster_assignments(assignments);
+        graph
+    }
+}
+
+// ============================================================================
 // TopicRepresentativeBuilder — select one phrase per cluster (stage 6, topic)
 // ============================================================================
 
@@ -1804,6 +2065,112 @@ impl PhraseBuilder for TopicRepresentativeBuilder {
                     a_pos.cmp(&b_pos)
                 })
                 // Tie-breaker 2: lemma text ascending.
+                .then_with(|| {
+                    let a_lemma = a.lemma_text.as_deref().unwrap_or("");
+                    let b_lemma = b.lemma_text.as_deref().unwrap_or("");
+                    a_lemma.cmp(b_lemma)
+                })
+        });
+
+        // --- 4. Truncate to top_n ---
+        if cfg.top_n > 0 && entries.len() > cfg.top_n {
+            entries.truncate(cfg.top_n);
+        }
+
+        PhraseSet::from_entries(entries)
+    }
+}
+
+// ============================================================================
+// MultipartitePhraseBuilder — highest-scoring per lemma group (stage 6, multipartite)
+// ============================================================================
+
+/// Selects the highest-scoring candidate per lemma group, collecting all
+/// occurrences.
+///
+/// This is the [`PhraseBuilder`] for MultipartiteRank.  Unlike
+/// [`TopicRepresentativeBuilder`] which groups by cluster and picks the
+/// first-occurring candidate, this builder:
+///
+/// 1. Groups candidates by **lemma text** (not cluster ID).
+/// 2. Picks the candidate with the **highest PageRank score** per group.
+/// 3. Collects offsets from all group members.
+/// 4. Sorts by score descending with deterministic tie-breakers.
+/// 5. Truncates to `cfg.top_n`.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct MultipartitePhraseBuilder;
+
+impl PhraseBuilder for MultipartitePhraseBuilder {
+    fn build(
+        &self,
+        tokens: TokenStreamRef<'_>,
+        candidates: CandidateSetRef<'_>,
+        ranks: &RankOutput,
+        graph: &Graph,
+        cfg: &TextRankConfig,
+    ) -> PhraseSet {
+        let _ = graph; // not used but required by trait signature
+
+        let phrases = candidates.phrases();
+        if phrases.is_empty() {
+            return PhraseSet::empty();
+        }
+
+        // --- 1. Group candidates by lemma text ---
+        let mut groups: HashMap<String, Vec<usize>> = HashMap::new();
+        for (i, phrase) in phrases.iter().enumerate() {
+            let lemma = materialize_phrase_lemma(tokens, phrase);
+            groups.entry(lemma).or_default().push(i);
+        }
+
+        // --- 2. For each group, pick highest-scored candidate ---
+        let mut entries: Vec<PhraseEntry> = Vec::with_capacity(groups.len());
+
+        for (lemma_text, member_indices) in &groups {
+            // Pick candidate with highest score.
+            let &best_idx = member_indices
+                .iter()
+                .max_by(|&&a, &&b| {
+                    ranks
+                        .score(a as u32)
+                        .partial_cmp(&ranks.score(b as u32))
+                        .unwrap_or(std::cmp::Ordering::Equal)
+                })
+                .unwrap();
+
+            let representative = &phrases[best_idx];
+            let score = ranks.score(best_idx as u32);
+            let surface = materialize_phrase_text(tokens, representative);
+
+            // Collect offsets from all group members, sorted by position.
+            let mut spans: Vec<(u32, u32)> = member_indices
+                .iter()
+                .map(|&idx| (phrases[idx].start_token, phrases[idx].end_token))
+                .collect();
+            spans.sort_by_key(|(start, _)| *start);
+
+            let lemma_ids = representative.lemma_ids.clone();
+
+            entries.push(PhraseEntry {
+                lemma_ids,
+                score,
+                count: member_indices.len() as u32,
+                surface: Some(surface),
+                lemma_text: Some(lemma_text.clone()),
+                spans: Some(spans),
+            });
+        }
+
+        // --- 3. Sort by score descending with deterministic tie-breakers ---
+        entries.sort_by(|a, b| {
+            b.score
+                .partial_cmp(&a.score)
+                .unwrap_or(std::cmp::Ordering::Equal)
+                .then_with(|| {
+                    let a_pos = a.spans.as_ref().and_then(|s| s.first().map(|p| p.0)).unwrap_or(u32::MAX);
+                    let b_pos = b.spans.as_ref().and_then(|s| s.first().map(|p| p.0)).unwrap_or(u32::MAX);
+                    a_pos.cmp(&b_pos)
+                })
                 .then_with(|| {
                     let a_lemma = a.lemma_text.as_deref().unwrap_or("");
                     let b_lemma = b.lemma_text.as_deref().unwrap_or("");
@@ -6289,5 +6656,356 @@ mod tests {
 
         // top_n=1 → at most 1 phrase.
         assert!(phrases.len() <= 1);
+    }
+
+    // ================================================================
+    // CandidateGraphBuilder tests
+    // ================================================================
+
+    #[test]
+    fn test_candidate_graph_builder_empty_candidates() {
+        let tokens = topic_test_tokens();
+        let stream = TokenStream::from_tokens(&tokens);
+        let empty_sel = PhraseCandidateSelector::new(vec![]);
+        let cfg = TextRankConfig::default();
+        let candidates = empty_sel.select(stream.as_ref(), &cfg);
+
+        let builder = CandidateGraphBuilder::new(JaccardHacClusterer::new(0.26));
+        let graph = builder.build(stream.as_ref(), candidates.as_ref(), &cfg);
+
+        assert!(graph.is_empty());
+    }
+
+    #[test]
+    fn test_candidate_graph_builder_single_candidate() {
+        let tokens = topic_test_tokens();
+        let stream = TokenStream::from_tokens(&tokens);
+        let sel = PhraseCandidateSelector::new(vec![topic_test_chunks()[0].clone()]);
+        let cfg = TextRankConfig::default();
+        let candidates = sel.select(stream.as_ref(), &cfg);
+
+        let builder = CandidateGraphBuilder::new(JaccardHacClusterer::new(0.26));
+        let graph = builder.build(stream.as_ref(), candidates.as_ref(), &cfg);
+
+        // Single candidate → 1 node, 0 edges.
+        assert_eq!(graph.num_nodes(), 1);
+        assert_eq!(graph.num_edges(), 0);
+        assert!(graph.cluster_assignments().is_some());
+    }
+
+    #[test]
+    fn test_candidate_graph_builder_three_candidates() {
+        let tokens = topic_test_tokens();
+        let stream = TokenStream::from_tokens(&tokens);
+        let sel = PhraseCandidateSelector::new(topic_test_chunks());
+        let cfg = TextRankConfig::default();
+        let candidates = sel.select(stream.as_ref(), &cfg);
+
+        let builder = CandidateGraphBuilder::new(JaccardHacClusterer::new(0.26));
+        let graph = builder.build(stream.as_ref(), candidates.as_ref(), &cfg);
+
+        // 3 candidates → 3 nodes, complete graph → 3 edges (each bidirectional = 6 directed).
+        assert_eq!(graph.num_nodes(), 3);
+        assert!(graph.num_edges() > 0, "Complete graph should have edges");
+        assert!(graph.cluster_assignments().is_some());
+    }
+
+    #[test]
+    fn test_candidate_graph_builder_attaches_cluster_assignments() {
+        let tokens = topic_test_tokens();
+        let stream = TokenStream::from_tokens(&tokens);
+        let sel = PhraseCandidateSelector::new(topic_test_chunks());
+        let cfg = TextRankConfig::default();
+        let candidates = sel.select(stream.as_ref(), &cfg);
+
+        let builder = CandidateGraphBuilder::new(JaccardHacClusterer::new(0.26));
+        let graph = builder.build(stream.as_ref(), candidates.as_ref(), &cfg);
+
+        let assignments = graph.cluster_assignments().unwrap();
+        assert_eq!(assignments.num_candidates(), 3);
+    }
+
+    #[test]
+    fn test_candidate_graph_builder_weights_are_inverse_gap() {
+        let tokens = topic_test_tokens();
+        let stream = TokenStream::from_tokens(&tokens);
+        let sel = PhraseCandidateSelector::new(topic_test_chunks());
+        let cfg = TextRankConfig::default();
+        let candidates = sel.select(stream.as_ref(), &cfg);
+
+        let builder = CandidateGraphBuilder::new(JaccardHacClusterer::new(0.26));
+        let graph = builder.build(stream.as_ref(), candidates.as_ref(), &cfg);
+
+        // All edge weights should be positive (1/gap where gap >= 1).
+        for node in 0..graph.num_nodes() as u32 {
+            for (_, w) in graph.neighbors(node) {
+                assert!(w > 0.0, "Edge weight should be positive (1/gap)");
+                assert!(w <= 1.0, "Edge weight should be <= 1.0 (gap >= 1)");
+            }
+        }
+    }
+
+    // ================================================================
+    // MultipartiteTransform tests
+    // ================================================================
+
+    #[test]
+    fn test_multipartite_transform_zeros_intra_cluster_edges() {
+        // Build a candidate graph, then apply the transform.
+        let tokens = topic_test_tokens();
+        let stream = TokenStream::from_tokens(&tokens);
+        let sel = PhraseCandidateSelector::new(topic_test_chunks());
+        let cfg = TextRankConfig::default();
+        let candidates = sel.select(stream.as_ref(), &cfg);
+
+        let builder = CandidateGraphBuilder::new(JaccardHacClusterer::new(0.26));
+        let mut graph = builder.build(stream.as_ref(), candidates.as_ref(), &cfg);
+
+        let assignments = graph.cluster_assignments().unwrap().clone();
+        let n = graph.num_nodes();
+
+        // Apply transform.
+        let transform = MultipartiteTransform::new();
+        transform.transform(&mut graph, stream.as_ref(), candidates.as_ref(), &cfg);
+
+        // Verify: no intra-cluster edges have positive weight.
+        for node in 0..n {
+            let cluster = assignments.cluster_of(node);
+            for (neighbor, w) in graph.neighbors(node as u32) {
+                if assignments.cluster_of(neighbor as usize) == cluster {
+                    assert!(
+                        w.abs() < 1e-10,
+                        "Intra-cluster edge {node}→{neighbor} should be zeroed, got {w}"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn test_multipartite_transform_preserves_inter_cluster_edges() {
+        let tokens = topic_test_tokens();
+        let stream = TokenStream::from_tokens(&tokens);
+        let sel = PhraseCandidateSelector::new(topic_test_chunks());
+        let cfg = TextRankConfig::default();
+        let candidates = sel.select(stream.as_ref(), &cfg);
+
+        let builder = CandidateGraphBuilder::new(JaccardHacClusterer::new(0.26));
+        let mut graph = builder.build(stream.as_ref(), candidates.as_ref(), &cfg);
+
+        let assignments = graph.cluster_assignments().unwrap().clone();
+
+        let transform = MultipartiteTransform::new();
+        transform.transform(&mut graph, stream.as_ref(), candidates.as_ref(), &cfg);
+
+        // At least some inter-cluster edges should have positive weight.
+        let has_inter = (0..graph.num_nodes())
+            .any(|node| {
+                let cluster = assignments.cluster_of(node);
+                graph.neighbors(node as u32)
+                    .any(|(nb, w)| assignments.cluster_of(nb as usize) != cluster && w > 0.0)
+            });
+        assert!(has_inter, "Should have at least one positive inter-cluster edge");
+    }
+
+    #[test]
+    fn test_multipartite_transform_alpha_zero_skips_boost() {
+        let tokens = topic_test_tokens();
+        let stream = TokenStream::from_tokens(&tokens);
+        let sel = PhraseCandidateSelector::new(topic_test_chunks());
+        let cfg = TextRankConfig::default();
+        let candidates = sel.select(stream.as_ref(), &cfg);
+
+        // Build two copies.
+        let builder = CandidateGraphBuilder::new(JaccardHacClusterer::new(0.26));
+        let sel2 = PhraseCandidateSelector::new(topic_test_chunks());
+        let candidates2 = sel2.select(stream.as_ref(), &cfg);
+
+        let mut graph_no_boost = builder.build(stream.as_ref(), candidates.as_ref(), &cfg);
+        let builder2 = CandidateGraphBuilder::new(JaccardHacClusterer::new(0.26));
+        let mut graph_with_boost = builder2.build(stream.as_ref(), candidates2.as_ref(), &cfg);
+
+        // Alpha=0 → no boost phase.
+        MultipartiteTransform::with_alpha(0.0)
+            .transform(&mut graph_no_boost, stream.as_ref(), candidates.as_ref(), &cfg);
+
+        // Alpha=1.1 → boost phase runs.
+        MultipartiteTransform::new()
+            .transform(&mut graph_with_boost, stream.as_ref(), candidates2.as_ref(), &cfg);
+
+        // Intra-cluster edges should be identically zeroed in both.
+        // Inter-cluster edges may differ if boost applied.
+        let assignments = graph_no_boost.cluster_assignments().unwrap().clone();
+        let num_clusters = assignments.num_clusters();
+
+        // Check that any multi-member cluster causes a weight difference.
+        let has_multi_member = (0..num_clusters)
+            .any(|c| assignments.members_of(c).len() > 1);
+
+        if has_multi_member {
+            // At least one inter-cluster weight should differ.
+            let any_diff = (0..graph_no_boost.num_nodes() as u32)
+                .flat_map(|n| {
+                    let nb_iter = graph_no_boost.neighbors(n).collect::<Vec<_>>();
+                    let wb_iter = graph_with_boost.neighbors(n).collect::<Vec<_>>();
+                    nb_iter.into_iter().zip(wb_iter)
+                })
+                .any(|((_, w1), (_, w2))| (w1 - w2).abs() > 1e-10);
+            assert!(any_diff, "Alpha=1.1 should produce different weights than alpha=0");
+        }
+    }
+
+    #[test]
+    fn test_multipartite_transform_empty_graph() {
+        let tokens = topic_test_tokens();
+        let stream = TokenStream::from_tokens(&tokens);
+        let empty_sel = PhraseCandidateSelector::new(vec![]);
+        let cfg = TextRankConfig::default();
+        let candidates = empty_sel.select(stream.as_ref(), &cfg);
+
+        let mut graph = Graph::empty();
+        let transform = MultipartiteTransform::new();
+
+        // Should not panic on empty graph.
+        transform.transform(&mut graph, stream.as_ref(), candidates.as_ref(), &cfg);
+        assert!(graph.is_empty());
+    }
+
+    #[test]
+    fn test_multipartite_transform_default_alpha() {
+        let t = MultipartiteTransform::new();
+        assert!((t.alpha - 1.1).abs() < 1e-10);
+    }
+
+    #[test]
+    fn test_multipartite_transform_custom_alpha() {
+        let t = MultipartiteTransform::with_alpha(2.5);
+        assert!((t.alpha - 2.5).abs() < 1e-10);
+    }
+
+    // ================================================================
+    // MultipartitePhraseBuilder tests
+    // ================================================================
+
+    #[test]
+    fn test_multipartite_phrase_builder_empty() {
+        let tokens = topic_test_tokens();
+        let stream = TokenStream::from_tokens(&tokens);
+        let empty_sel = PhraseCandidateSelector::new(vec![]);
+        let cfg = TextRankConfig::default();
+        let candidates = empty_sel.select(stream.as_ref(), &cfg);
+
+        let graph = Graph::empty();
+        let ranks = PageRankRanker.rank(&graph, None, &cfg);
+
+        let phrases = MultipartitePhraseBuilder.build(
+            stream.as_ref(),
+            candidates.as_ref(),
+            &ranks,
+            &graph,
+            &cfg,
+        );
+
+        assert!(phrases.is_empty());
+    }
+
+    #[test]
+    fn test_multipartite_phrase_builder_groups_by_lemma() {
+        // Two identical phrases (same lemma) → should produce 1 group.
+        let tokens = vec![
+            Token::new("Machine", "machine", PosTag::Noun, 0, 7, 0, 0),
+            Token::new("learning", "learning", PosTag::Noun, 8, 16, 0, 1),
+            Token::new("Machine", "machine", PosTag::Noun, 17, 24, 1, 2),
+            Token::new("learning", "learning", PosTag::Noun, 25, 33, 1, 3),
+        ];
+        let chunks = vec![
+            ChunkSpan { start_token: 0, end_token: 2, start_char: 0, end_char: 16, sentence_idx: 0 },
+            ChunkSpan { start_token: 2, end_token: 4, start_char: 17, end_char: 33, sentence_idx: 1 },
+        ];
+
+        let stream = TokenStream::from_tokens(&tokens);
+        let sel = PhraseCandidateSelector::new(chunks);
+        let cfg = TextRankConfig::default();
+        let candidates = sel.select(stream.as_ref(), &cfg);
+
+        let builder = CandidateGraphBuilder::new(JaccardHacClusterer::new(0.26));
+        let mut graph = builder.build(stream.as_ref(), candidates.as_ref(), &cfg);
+        MultipartiteTransform::new()
+            .transform(&mut graph, stream.as_ref(), candidates.as_ref(), &cfg);
+        let ranks = PageRankRanker.rank(&graph, None, &cfg);
+
+        let phrases = MultipartitePhraseBuilder.build(
+            stream.as_ref(),
+            candidates.as_ref(),
+            &ranks,
+            &graph,
+            &cfg,
+        );
+
+        // Both occurrences have the same lemma → grouped into 1 phrase.
+        assert_eq!(phrases.len(), 1, "Same-lemma candidates should group into 1 phrase");
+        let entry = &phrases.entries()[0];
+        assert_eq!(entry.count, 2, "Should count both occurrences");
+        assert_eq!(entry.spans.as_ref().unwrap().len(), 2, "Should collect both spans");
+    }
+
+    #[test]
+    fn test_multipartite_phrase_builder_picks_highest_scored() {
+        let tokens = topic_test_tokens();
+        let stream = TokenStream::from_tokens(&tokens);
+        let sel = PhraseCandidateSelector::new(topic_test_chunks());
+        let cfg = TextRankConfig::default();
+        let candidates = sel.select(stream.as_ref(), &cfg);
+
+        let builder = CandidateGraphBuilder::new(JaccardHacClusterer::new(0.26));
+        let mut graph = builder.build(stream.as_ref(), candidates.as_ref(), &cfg);
+        MultipartiteTransform::new()
+            .transform(&mut graph, stream.as_ref(), candidates.as_ref(), &cfg);
+        let ranks = PageRankRanker.rank(&graph, None, &cfg);
+
+        let phrases = MultipartitePhraseBuilder.build(
+            stream.as_ref(),
+            candidates.as_ref(),
+            &ranks,
+            &graph,
+            &cfg,
+        );
+
+        // Should produce phrases, sorted by score descending.
+        assert!(!phrases.is_empty());
+        let entries = phrases.entries();
+        for window in entries.windows(2) {
+            assert!(
+                window[0].score >= window[1].score,
+                "Phrases should be sorted by score descending: {} >= {}",
+                window[0].score,
+                window[1].score,
+            );
+        }
+    }
+
+    #[test]
+    fn test_multipartite_phrase_builder_respects_top_n() {
+        let tokens = topic_test_tokens();
+        let stream = TokenStream::from_tokens(&tokens);
+        let sel = PhraseCandidateSelector::new(topic_test_chunks());
+        let cfg = TextRankConfig::default().with_top_n(1);
+        let candidates = sel.select(stream.as_ref(), &cfg);
+
+        let builder = CandidateGraphBuilder::new(JaccardHacClusterer::new(0.26));
+        let mut graph = builder.build(stream.as_ref(), candidates.as_ref(), &cfg);
+        MultipartiteTransform::new()
+            .transform(&mut graph, stream.as_ref(), candidates.as_ref(), &cfg);
+        let ranks = PageRankRanker.rank(&graph, None, &cfg);
+
+        let phrases = MultipartitePhraseBuilder.build(
+            stream.as_ref(),
+            candidates.as_ref(),
+            &ranks,
+            &graph,
+            &cfg,
+        );
+
+        assert!(phrases.len() <= 1, "top_n=1 should produce at most 1 phrase");
     }
 }

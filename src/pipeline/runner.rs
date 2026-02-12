@@ -24,8 +24,9 @@ use crate::pipeline::observer::{
     STAGE_TELEPORT,
 };
 use crate::pipeline::traits::{
-    CandidateSelector, ChunkPhraseBuilder, FocusTermsTeleportBuilder, GraphBuilder, GraphTransform,
-    JaccardHacClusterer, NoopGraphTransform, NoopPreprocessor, PageRankRanker,
+    CandidateGraphBuilder, CandidateSelector, ChunkPhraseBuilder, FocusTermsTeleportBuilder,
+    GraphBuilder, GraphTransform, JaccardHacClusterer, MultipartitePhraseBuilder,
+    MultipartiteTransform, NoopGraphTransform, NoopPreprocessor, PageRankRanker,
     PhraseCandidateSelector, PhraseBuilder, PositionTeleportBuilder, Preprocessor, Ranker,
     ResultFormatter, StandardResultFormatter, TeleportBuilder, TopicGraphBuilder,
     TopicRepresentativeBuilder, TopicWeightsTeleportBuilder, UniformTeleportBuilder,
@@ -328,6 +329,70 @@ impl TopicRankPipeline {
             teleport_builder: UniformTeleportBuilder,
             ranker: PageRankRanker,
             phrase_builder: TopicRepresentativeBuilder,
+            formatter: StandardResultFormatter,
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// MultipartiteRankPipeline — candidate-level k-partite graph
+// ---------------------------------------------------------------------------
+
+/// Pipeline alias for MultipartiteRank: phrase candidates → HAC clustering →
+/// candidate graph (one node per candidate) → k-partite transform + alpha
+/// boost → PageRank → highest-scoring per lemma group.
+///
+/// Unlike [`TopicRankPipeline`] where clusters are graph nodes,
+/// MultipartiteRank keeps individual candidates as nodes and removes
+/// intra-cluster edges to form a k-partite structure, then boosts edges
+/// toward first-occurring variants.
+pub type MultipartiteRankPipeline = Pipeline<
+    NoopPreprocessor,
+    PhraseCandidateSelector,
+    CandidateGraphBuilder<JaccardHacClusterer>,
+    MultipartiteTransform,
+    UniformTeleportBuilder,
+    PageRankRanker,
+    MultipartitePhraseBuilder,
+    StandardResultFormatter,
+>;
+
+impl MultipartiteRankPipeline {
+    /// Build a pipeline for the MultipartiteRank algorithm with default
+    /// parameters.
+    ///
+    /// - Similarity threshold: `0.26` (HAC Jaccard cutoff)
+    /// - Alpha: `1.1` (boost scaling factor)
+    pub fn multipartite_rank(chunks: Vec<crate::types::ChunkSpan>) -> Self {
+        Pipeline {
+            preprocessor: NoopPreprocessor,
+            selector: PhraseCandidateSelector::new(chunks),
+            graph_builder: CandidateGraphBuilder::new(JaccardHacClusterer::new(0.26)),
+            graph_transform: MultipartiteTransform::new(),
+            teleport_builder: UniformTeleportBuilder,
+            ranker: PageRankRanker,
+            phrase_builder: MultipartitePhraseBuilder,
+            formatter: StandardResultFormatter,
+        }
+    }
+
+    /// Build a MultipartiteRank pipeline with custom similarity threshold
+    /// and alpha.
+    pub fn multipartite_rank_with(
+        chunks: Vec<crate::types::ChunkSpan>,
+        similarity_threshold: f64,
+        alpha: f64,
+    ) -> Self {
+        Pipeline {
+            preprocessor: NoopPreprocessor,
+            selector: PhraseCandidateSelector::new(chunks),
+            graph_builder: CandidateGraphBuilder::new(
+                JaccardHacClusterer::new(similarity_threshold),
+            ),
+            graph_transform: MultipartiteTransform::with_alpha(alpha),
+            teleport_builder: UniformTeleportBuilder,
+            ranker: PageRankRanker,
+            phrase_builder: MultipartitePhraseBuilder,
             formatter: StandardResultFormatter,
         }
     }
@@ -1827,5 +1892,150 @@ mod tests {
             "Strict threshold (0.99) should yield >= phrases than relaxed (0.01): got {} vs {}",
             r_strict.phrases.len(), r_relaxed.phrases.len()
         );
+    }
+
+    // ================================================================
+    // MultipartiteRankPipeline tests
+    // ================================================================
+
+    #[test]
+    fn test_multipartite_pipeline_constructs_and_runs() {
+        let tokens = topic_rank_tokens();
+        let stream = TokenStream::from_tokens(&tokens);
+        let cfg = TextRankConfig::default();
+        let mut obs = NoopObserver;
+
+        let pipeline = super::MultipartiteRankPipeline::multipartite_rank(topic_rank_chunks());
+        let result = pipeline.run(stream, &cfg, &mut obs);
+
+        assert!(!result.phrases.is_empty(), "MultipartiteRank should produce phrases");
+        assert!(result.converged, "PageRank should converge");
+    }
+
+    #[test]
+    fn test_multipartite_pipeline_empty_input() {
+        let stream = TokenStream::from_tokens(&[]);
+        let cfg = TextRankConfig::default();
+        let mut obs = NoopObserver;
+
+        let pipeline = super::MultipartiteRankPipeline::multipartite_rank(vec![]);
+        let result = pipeline.run(stream, &cfg, &mut obs);
+
+        assert!(result.phrases.is_empty());
+    }
+
+    #[test]
+    fn test_multipartite_pipeline_deterministic() {
+        let tokens = topic_rank_tokens();
+        let chunks = topic_rank_chunks();
+        let cfg = TextRankConfig::default();
+
+        let run = || {
+            let stream = TokenStream::from_tokens(&tokens);
+            let mut obs = NoopObserver;
+            super::MultipartiteRankPipeline::multipartite_rank(chunks.clone())
+                .run(stream, &cfg, &mut obs)
+        };
+
+        let r1 = run();
+        let r2 = run();
+
+        assert_eq!(r1.phrases.len(), r2.phrases.len());
+        for (p1, p2) in r1.phrases.iter().zip(r2.phrases.iter()) {
+            assert_eq!(p1.text, p2.text, "Phrase text should be deterministic");
+            assert!(
+                (p1.score - p2.score).abs() < 1e-12,
+                "Scores should be identical: {} vs {}",
+                p1.score,
+                p2.score,
+            );
+        }
+    }
+
+    #[test]
+    fn test_multipartite_pipeline_alpha_affects_scores() {
+        let tokens = topic_rank_tokens();
+        let chunks = topic_rank_chunks();
+        let cfg = TextRankConfig::default();
+
+        // Alpha = 0.0 (no boost).
+        let stream1 = TokenStream::from_tokens(&tokens);
+        let mut obs1 = NoopObserver;
+        let r_no_boost = super::MultipartiteRankPipeline::multipartite_rank_with(
+            chunks.clone(), 0.26, 0.0,
+        ).run(stream1, &cfg, &mut obs1);
+
+        // Alpha = 5.0 (strong boost).
+        let stream2 = TokenStream::from_tokens(&tokens);
+        let mut obs2 = NoopObserver;
+        let r_high_boost = super::MultipartiteRankPipeline::multipartite_rank_with(
+            chunks, 0.26, 5.0,
+        ).run(stream2, &cfg, &mut obs2);
+
+        // Both should produce phrases.
+        assert!(!r_no_boost.phrases.is_empty());
+        assert!(!r_high_boost.phrases.is_empty());
+
+        // With different alpha, scores should differ.
+        let any_diff = r_no_boost.phrases.iter()
+            .zip(r_high_boost.phrases.iter())
+            .any(|(a, b)| (a.score - b.score).abs() > 1e-10 || a.text != b.text);
+
+        assert!(
+            any_diff,
+            "Different alpha values should produce different results"
+        );
+    }
+
+    #[test]
+    fn test_multipartite_pipeline_threshold_affects_clustering() {
+        let tokens = topic_rank_tokens();
+        let chunks = topic_rank_chunks();
+        let cfg = TextRankConfig::default();
+
+        // Very strict threshold → more clusters.
+        let stream1 = TokenStream::from_tokens(&tokens);
+        let mut obs1 = NoopObserver;
+        let r_strict = super::MultipartiteRankPipeline::multipartite_rank_with(
+            chunks.clone(), 0.99, 1.1,
+        ).run(stream1, &cfg, &mut obs1);
+
+        // Very relaxed threshold → fewer clusters.
+        let stream2 = TokenStream::from_tokens(&tokens);
+        let mut obs2 = NoopObserver;
+        let r_relaxed = super::MultipartiteRankPipeline::multipartite_rank_with(
+            chunks, 0.01, 1.1,
+        ).run(stream2, &cfg, &mut obs2);
+
+        // Both should produce valid output.
+        assert!(!r_strict.phrases.is_empty());
+        assert!(!r_relaxed.phrases.is_empty());
+    }
+
+    #[test]
+    fn test_multipartite_pipeline_single_candidate() {
+        let tokens = vec![
+            Token::new("Machine", "machine", PosTag::Noun, 0, 7, 0, 0),
+            Token::new("learning", "learning", PosTag::Noun, 8, 16, 0, 1),
+        ];
+        let chunks = vec![
+            crate::types::ChunkSpan {
+                start_token: 0,
+                end_token: 2,
+                start_char: 0,
+                end_char: 16,
+                sentence_idx: 0,
+            },
+        ];
+
+        let stream = TokenStream::from_tokens(&tokens);
+        let cfg = TextRankConfig::default();
+        let mut obs = NoopObserver;
+
+        let pipeline = super::MultipartiteRankPipeline::multipartite_rank(chunks);
+        let result = pipeline.run(stream, &cfg, &mut obs);
+
+        assert_eq!(result.phrases.len(), 1, "Single candidate should produce one phrase");
+        assert!(result.phrases[0].score > 0.0);
     }
 }

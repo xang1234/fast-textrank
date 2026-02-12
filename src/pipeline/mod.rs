@@ -36,16 +36,18 @@ pub use observer::{
 
 // Re-export runner types (Pipeline, builder, type alias).
 pub use runner::{
-    BaseTextRankPipeline, BiasedTextRankPipeline, Pipeline, PipelineBuilder,
-    PositionRankPipeline, SingleRankPipeline, TopicRankPipeline, TopicalPageRankPipeline,
+    BaseTextRankPipeline, BiasedTextRankPipeline, MultipartiteRankPipeline, Pipeline,
+    PipelineBuilder, PositionRankPipeline, SingleRankPipeline, TopicRankPipeline,
+    TopicalPageRankPipeline,
 };
 
 // Re-export stage traits and default implementations.
 pub use traits::{
-    AlphaBoostWeighter, CandidateSelector, ChunkPhraseBuilder, Clusterer,
+    AlphaBoostWeighter, CandidateGraphBuilder, CandidateSelector, ChunkPhraseBuilder, Clusterer,
     CooccurrenceGraphBuilder, EdgeWeightPolicy, FocusTermsTeleportBuilder, GraphBuilder,
-    GraphTransform, IntraTopicEdgeRemover, JaccardHacClusterer, Linkage, NoopClusterer,
-    NoopGraphTransform, NoopPreprocessor, PageRankRanker, PhraseBuilder, PhraseCandidateSelector,
+    GraphTransform, IntraTopicEdgeRemover, JaccardHacClusterer, Linkage,
+    MultipartitePhraseBuilder, MultipartiteTransform, NoopClusterer, NoopGraphTransform,
+    NoopPreprocessor, PageRankRanker, PhraseBuilder, PhraseCandidateSelector,
     PositionTeleportBuilder, Preprocessor, Ranker, ResultFormatter, StandardResultFormatter,
     TeleportBuilder, TopicGraphBuilder, TopicRepresentativeBuilder,
     TopicWeightsTeleportBuilder, UniformTeleportBuilder, WindowGraphBuilder, WindowStrategy,

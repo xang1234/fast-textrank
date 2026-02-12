@@ -45,10 +45,11 @@ pub use pipeline::errors::{PipelineRuntimeError, PipelineSpecError};
 pub use pipeline::spec::{PipelineSpec, RuntimeSpec};
 pub use pipeline::validation::{ValidationEngine, ValidationReport};
 pub use pipeline::{
-    AlphaBoostWeighter, CandidateSelector, ChunkPhraseBuilder, ClusterAssignments, Clusterer,
-    CooccurrenceGraphBuilder, EdgeWeightPolicy, FocusTermsTeleportBuilder,
-    IntraTopicEdgeRemover, JaccardHacClusterer, Linkage, NoopClusterer, NoopGraphTransform,
-    NoopPreprocessor, PhraseBuilder, TopicGraphBuilder, TopicRankPipeline,
+    AlphaBoostWeighter, CandidateGraphBuilder, CandidateSelector, ChunkPhraseBuilder,
+    ClusterAssignments, Clusterer, CooccurrenceGraphBuilder, EdgeWeightPolicy,
+    FocusTermsTeleportBuilder, IntraTopicEdgeRemover, JaccardHacClusterer, Linkage,
+    MultipartitePhraseBuilder, MultipartiteRankPipeline, MultipartiteTransform, NoopClusterer,
+    NoopGraphTransform, NoopPreprocessor, PhraseBuilder, TopicGraphBuilder, TopicRankPipeline,
     TopicRepresentativeBuilder, TopicWeightsTeleportBuilder, TopicalPageRankPipeline,
     PhraseCandidateSelector, PositionTeleportBuilder, Preprocessor, ResultFormatter,
     StandardResultFormatter, TeleportBuilder, TeleportType, TeleportVector, TokenEntry,
