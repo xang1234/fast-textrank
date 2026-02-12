@@ -1292,4 +1292,305 @@ mod tests {
             assert_eq!(a.rank, b.rank, "Rank mismatch at position {i}");
         }
     }
+
+    // ================================================================
+    // TopicalPageRank pipeline integration tests (e61.3)
+    // ================================================================
+
+    /// Golden test: TopicalPageRank pipeline produces identical output to
+    /// the legacy `TopicalPageRank::extract_with_info()` path.
+    #[test]
+    fn golden_topical_pipeline_matches_legacy() {
+        use crate::variants::topical_pagerank::TopicalPageRank;
+        use std::collections::HashMap;
+
+        let tokens = golden_tokens();
+        let cfg = TextRankConfig::default();
+
+        let mut weights = HashMap::new();
+        weights.insert("machine".to_string(), 2.0);
+        weights.insert("network".to_string(), 1.5);
+
+        // Legacy path
+        let legacy = TopicalPageRank::with_config(cfg.clone())
+            .with_topic_weights(weights.clone())
+            .with_min_weight(0.1)
+            .extract_with_info(&tokens);
+
+        // Pipeline path
+        let pipeline = super::TopicalPageRankPipeline::topical(weights, 0.1);
+        let stream = TokenStream::from_tokens(&tokens);
+        let mut obs = NoopObserver;
+        let pipeline_result = pipeline.run(stream, &cfg, &mut obs);
+
+        // Convergence metadata must match.
+        assert_eq!(
+            legacy.converged, pipeline_result.converged,
+            "Convergence mismatch: legacy={}, pipeline={}",
+            legacy.converged, pipeline_result.converged
+        );
+        assert_eq!(
+            legacy.iterations, pipeline_result.iterations as usize,
+            "Iteration count mismatch: legacy={}, pipeline={}",
+            legacy.iterations, pipeline_result.iterations
+        );
+
+        // Phrase count must match.
+        assert_eq!(
+            legacy.phrases.len(),
+            pipeline_result.phrases.len(),
+            "Phrase count mismatch: legacy={}, pipeline={}",
+            legacy.phrases.len(),
+            pipeline_result.phrases.len()
+        );
+
+        // Every phrase must match: text, lemma, score, rank.
+        let eps = 1e-8;
+        for (i, (lp, pp)) in legacy
+            .phrases
+            .iter()
+            .zip(pipeline_result.phrases.iter())
+            .enumerate()
+        {
+            assert_eq!(
+                lp.text, pp.text,
+                "Text mismatch at {i}: legacy={:?}, pipeline={:?}",
+                lp.text, pp.text
+            );
+            assert_eq!(
+                lp.lemma, pp.lemma,
+                "Lemma mismatch at {i}: legacy={:?}, pipeline={:?}",
+                lp.lemma, pp.lemma
+            );
+            assert!(
+                (lp.score - pp.score).abs() < eps,
+                "Score mismatch at {i} ({:?}): legacy={:.10}, pipeline={:.10}, delta={:.2e}",
+                lp.text,
+                lp.score,
+                pp.score,
+                (lp.score - pp.score).abs()
+            );
+            assert_eq!(
+                lp.rank, pp.rank,
+                "Rank mismatch at {i}: legacy={}, pipeline={}",
+                lp.rank, pp.rank
+            );
+        }
+    }
+
+    /// Verify that `min_weight` controls how out-of-vocabulary candidates
+    /// are scored: OOV lemmas should score higher with `min_weight=1.0`
+    /// than with `min_weight=0.0`.
+    #[test]
+    fn test_topical_pipeline_min_weight_affects_oov() {
+        use std::collections::HashMap;
+
+        let tokens = golden_tokens();
+        let cfg = TextRankConfig::default();
+
+        // Only "machine" has a topic weight — "algorithm" is OOV.
+        let mut weights = HashMap::new();
+        weights.insert("machine".to_string(), 2.0);
+
+        // min_weight=0.0 → OOV candidates get zero teleport probability.
+        let result_zero = {
+            let pipeline =
+                super::TopicalPageRankPipeline::topical(weights.clone(), 0.0);
+            let stream = TokenStream::from_tokens(&tokens);
+            let mut obs = NoopObserver;
+            pipeline.run(stream, &cfg, &mut obs)
+        };
+
+        // min_weight=1.0 → OOV candidates get base teleport weight.
+        let result_one = {
+            let pipeline =
+                super::TopicalPageRankPipeline::topical(weights, 1.0);
+            let stream = TokenStream::from_tokens(&tokens);
+            let mut obs = NoopObserver;
+            pipeline.run(stream, &cfg, &mut obs)
+        };
+
+        // Find score of phrase containing "algorithm" in both runs.
+        let algo_score_zero = result_zero
+            .phrases
+            .iter()
+            .find(|p| p.lemma.contains("algorithm"))
+            .map(|p| p.score)
+            .expect("Should find 'algorithm' phrase in zero run");
+        let algo_score_one = result_one
+            .phrases
+            .iter()
+            .find(|p| p.lemma.contains("algorithm"))
+            .map(|p| p.score)
+            .expect("Should find 'algorithm' phrase in one run");
+
+        assert!(
+            algo_score_one > algo_score_zero,
+            "OOV 'algorithm' score with min_weight=1.0 ({:.10}) should exceed \
+             min_weight=0.0 ({:.10})",
+            algo_score_one,
+            algo_score_zero
+        );
+    }
+
+    /// Verify sensitivity — changing which lemma gets the highest topic
+    /// weight changes relative ranking.  "algorithm" appears only once
+    /// in `golden_tokens()` while "machine learning" appears twice, so
+    /// graph structure strongly favors "machine".  We assert a weaker
+    /// (but still meaningful) property: the *relative* score of
+    /// "algorithm" vs "machine" must shift in favor of whichever lemma
+    /// receives the large topic weight.
+    #[test]
+    fn test_topical_pipeline_different_weights_change_top_phrase() {
+        use std::collections::HashMap;
+
+        let tokens = golden_tokens();
+        let cfg = TextRankConfig::default();
+
+        // Heavy weight on "machine".
+        let result_machine = {
+            let mut w = HashMap::new();
+            w.insert("machine".to_string(), 100.0);
+            let pipeline = super::TopicalPageRankPipeline::topical(w, 0.01);
+            let stream = TokenStream::from_tokens(&tokens);
+            let mut obs = NoopObserver;
+            pipeline.run(stream, &cfg, &mut obs)
+        };
+
+        // Heavy weight on "algorithm".
+        let result_algo = {
+            let mut w = HashMap::new();
+            w.insert("algorithm".to_string(), 100.0);
+            let pipeline = super::TopicalPageRankPipeline::topical(w, 0.01);
+            let stream = TokenStream::from_tokens(&tokens);
+            let mut obs = NoopObserver;
+            pipeline.run(stream, &cfg, &mut obs)
+        };
+
+        // Helper: find score of a phrase whose lemma contains the target.
+        let find_score = |phrases: &[crate::types::Phrase], target: &str| -> f64 {
+            phrases
+                .iter()
+                .find(|p| p.lemma.contains(target))
+                .map(|p| p.score)
+                .unwrap_or(0.0)
+        };
+
+        // When "machine" is boosted, its score relative to "algorithm"
+        // should be higher than in the "algorithm"-boosted run.
+        let machine_ratio_in_m = find_score(&result_machine.phrases, "machine")
+            / find_score(&result_machine.phrases, "algorithm").max(1e-15);
+        let machine_ratio_in_a = find_score(&result_algo.phrases, "machine")
+            / find_score(&result_algo.phrases, "algorithm").max(1e-15);
+
+        assert!(
+            machine_ratio_in_m > machine_ratio_in_a,
+            "machine/algorithm score ratio should be higher when 'machine' is \
+             boosted ({:.4}) than when 'algorithm' is boosted ({:.4})",
+            machine_ratio_in_m,
+            machine_ratio_in_a
+        );
+    }
+
+    /// Verify that per-call config overrides (damping factor) affect
+    /// pipeline output — different damping values must produce different
+    /// score distributions.
+    #[test]
+    fn test_topical_pipeline_per_call_config_override() {
+        use std::collections::HashMap;
+
+        let tokens = golden_tokens();
+
+        let mut weights = HashMap::new();
+        weights.insert("machine".to_string(), 2.0);
+        let pipeline = super::TopicalPageRankPipeline::topical(weights, 0.1);
+
+        // Low damping — teleport dominates.
+        let mut cfg_low = TextRankConfig::default();
+        cfg_low.damping = 0.5;
+        let result_low = {
+            let stream = TokenStream::from_tokens(&tokens);
+            let mut obs = NoopObserver;
+            pipeline.run(stream, &cfg_low, &mut obs)
+        };
+
+        // High damping — link structure dominates.
+        let mut cfg_high = TextRankConfig::default();
+        cfg_high.damping = 0.99;
+        let result_high = {
+            let stream = TokenStream::from_tokens(&tokens);
+            let mut obs = NoopObserver;
+            pipeline.run(stream, &cfg_high, &mut obs)
+        };
+
+        assert!(!result_low.phrases.is_empty());
+        assert!(!result_high.phrases.is_empty());
+
+        // At least one phrase score must differ between the two damping
+        // values, proving per-call config is respected.
+        let any_diff = result_low
+            .phrases
+            .iter()
+            .zip(result_high.phrases.iter())
+            .any(|(l, h)| (l.score - h.score).abs() > 1e-10);
+
+        assert!(
+            any_diff,
+            "Different damping values (0.5 vs 0.99) must produce different scores"
+        );
+    }
+
+    /// Edge case: empty topic_weights with min_weight=0.0 produces an
+    /// all-zero teleport vector, which normalizes to uniform — pipeline
+    /// should still produce valid phrases (equivalent to SingleRank).
+    #[test]
+    fn test_topical_pipeline_empty_weights_fallback() {
+        use std::collections::HashMap;
+
+        let tokens = golden_tokens();
+        let cfg = TextRankConfig::default();
+
+        let pipeline =
+            super::TopicalPageRankPipeline::topical(HashMap::new(), 0.0);
+        let stream = TokenStream::from_tokens(&tokens);
+        let mut obs = NoopObserver;
+        let result = pipeline.run(stream, &cfg, &mut obs);
+
+        assert!(result.converged, "Should converge even with empty weights");
+        assert!(
+            !result.phrases.is_empty(),
+            "Should still produce phrases with empty weights (uniform fallback)"
+        );
+
+        // Compare to SingleRank — with uniform teleport, TopicalPageRank
+        // should behave like SingleRank (same graph, same uniform PPR).
+        let single_result = {
+            let stream = TokenStream::from_tokens(&tokens);
+            let mut obs = NoopObserver;
+            super::SingleRankPipeline::single_rank().run(stream, &cfg, &mut obs)
+        };
+
+        assert_eq!(
+            result.phrases.len(),
+            single_result.phrases.len(),
+            "Empty-weights topical should produce same phrase count as SingleRank"
+        );
+
+        // Scores should match since both use uniform teleport.
+        let eps = 1e-8;
+        for (i, (tp, sp)) in result
+            .phrases
+            .iter()
+            .zip(single_result.phrases.iter())
+            .enumerate()
+        {
+            assert_eq!(tp.text, sp.text, "Text mismatch at {i}");
+            assert!(
+                (tp.score - sp.score).abs() < eps,
+                "Score mismatch at {i}: topical={:.10}, single={:.10}",
+                tp.score,
+                sp.score
+            );
+        }
+    }
 }
