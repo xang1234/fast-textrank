@@ -311,6 +311,58 @@ impl Phrase {
             rank: 0,
         }
     }
+
+    /// Stable tie-breaker comparator for deterministic phrase ranking.
+    ///
+    /// When two phrases have scores within `SCORE_EPSILON`, tie-breakers are
+    /// applied in order:
+    ///
+    /// 1. **Score** descending (primary)
+    /// 2. **Earliest first occurrence** ascending (`offsets[0].0`)
+    /// 3. **Shorter phrase length** ascending (token count of first occurrence)
+    /// 4. **Lemma** lexicographic ascending
+    ///
+    /// This guarantees a total, deterministic ordering regardless of platform,
+    /// hash seed, or floating-point reduction order.
+    pub fn stable_cmp(&self, other: &Self) -> std::cmp::Ordering {
+        /// Two scores within this epsilon are considered tied.
+        const SCORE_EPSILON: f64 = 1e-10;
+
+        let score_diff = self.score - other.score;
+        if score_diff.abs() > SCORE_EPSILON {
+            // Higher score first (descending).
+            return if score_diff > 0.0 {
+                std::cmp::Ordering::Less
+            } else {
+                std::cmp::Ordering::Greater
+            };
+        }
+
+        // Tie-breaker 1: earliest first occurrence (ascending).
+        let self_pos = self.offsets.first().map_or(usize::MAX, |o| o.0);
+        let other_pos = other.offsets.first().map_or(usize::MAX, |o| o.0);
+        let pos_ord = self_pos.cmp(&other_pos);
+        if pos_ord != std::cmp::Ordering::Equal {
+            return pos_ord;
+        }
+
+        // Tie-breaker 2: shorter phrase length (ascending token count).
+        let self_len = self
+            .offsets
+            .first()
+            .map_or(0, |o| o.1.saturating_sub(o.0));
+        let other_len = other
+            .offsets
+            .first()
+            .map_or(0, |o| o.1.saturating_sub(o.0));
+        let len_ord = self_len.cmp(&other_len);
+        if len_ord != std::cmp::Ordering::Equal {
+            return len_ord;
+        }
+
+        // Tie-breaker 3: lemma lexicographic (ascending).
+        self.lemma.cmp(&other.lemma)
+    }
 }
 
 // ============================================================================
@@ -773,5 +825,100 @@ mod tests {
         assert!(c1.overlaps(&c2)); // overlapping
         assert!(!c1.overlaps(&c3)); // non-overlapping
         assert!(!c2.overlaps(&c3)); // adjacent, not overlapping
+    }
+
+    // ================================================================
+    // Phrase::stable_cmp — deterministic tie-breaker comparator
+    // ================================================================
+
+    /// Helper: build a Phrase with offsets for testing stable_cmp.
+    fn phrase(lemma: &str, score: f64, offsets: Vec<(usize, usize)>) -> Phrase {
+        Phrase {
+            text: lemma.to_string(),
+            lemma: lemma.to_string(),
+            score,
+            count: offsets.len(),
+            offsets,
+            rank: 0,
+        }
+    }
+
+    #[test]
+    fn test_stable_cmp_score_descending() {
+        let a = phrase("alpha", 0.8, vec![(0, 1)]);
+        let b = phrase("beta", 0.5, vec![(1, 2)]);
+        // Higher score comes first.
+        assert_eq!(a.stable_cmp(&b), std::cmp::Ordering::Less);
+        assert_eq!(b.stable_cmp(&a), std::cmp::Ordering::Greater);
+    }
+
+    #[test]
+    fn test_stable_cmp_tie_earliest_occurrence() {
+        let a = phrase("alpha", 0.5, vec![(0, 1)]);
+        let b = phrase("beta", 0.5, vec![(3, 4)]);
+        // Same score → earlier occurrence wins.
+        assert_eq!(a.stable_cmp(&b), std::cmp::Ordering::Less);
+        assert_eq!(b.stable_cmp(&a), std::cmp::Ordering::Greater);
+    }
+
+    #[test]
+    fn test_stable_cmp_tie_shorter_phrase() {
+        let a = phrase("alpha", 0.5, vec![(2, 3)]); // length 1
+        let b = phrase("beta", 0.5, vec![(2, 5)]);  // length 3
+        // Same score, same position → shorter phrase wins.
+        assert_eq!(a.stable_cmp(&b), std::cmp::Ordering::Less);
+        assert_eq!(b.stable_cmp(&a), std::cmp::Ordering::Greater);
+    }
+
+    #[test]
+    fn test_stable_cmp_tie_lexicographic_lemma() {
+        let a = phrase("alpha", 0.5, vec![(2, 4)]);
+        let b = phrase("beta", 0.5, vec![(2, 4)]);
+        // Same score, position, length → lexicographic on lemma.
+        assert_eq!(a.stable_cmp(&b), std::cmp::Ordering::Less);
+        assert_eq!(b.stable_cmp(&a), std::cmp::Ordering::Greater);
+    }
+
+    #[test]
+    fn test_stable_cmp_equal_phrases() {
+        let a = phrase("alpha", 0.5, vec![(2, 4)]);
+        let b = phrase("alpha", 0.5, vec![(2, 4)]);
+        assert_eq!(a.stable_cmp(&b), std::cmp::Ordering::Equal);
+    }
+
+    #[test]
+    fn test_stable_cmp_epsilon_tie() {
+        // Scores within epsilon (1e-10) should be treated as tied.
+        let a = phrase("alpha", 0.5, vec![(0, 1)]);
+        let b = phrase("beta", 0.5 + 1e-12, vec![(5, 6)]);
+        // Scores are within epsilon → tie-break on position.
+        assert_eq!(a.stable_cmp(&b), std::cmp::Ordering::Less);
+    }
+
+    #[test]
+    fn test_stable_cmp_no_offsets() {
+        // Phrases without offsets → position defaults to usize::MAX.
+        let a = phrase("alpha", 0.5, vec![]);
+        let b = phrase("beta", 0.5, vec![]);
+        // Same position (MAX), same length (0) → lemma breaks tie.
+        assert_eq!(a.stable_cmp(&b), std::cmp::Ordering::Less);
+    }
+
+    #[test]
+    fn test_stable_cmp_sort_integration() {
+        // Verify that sorting a Vec<Phrase> with stable_cmp produces a
+        // deterministic order matching all tie-breaker rules.
+        let mut phrases = vec![
+            phrase("delta", 0.3, vec![(10, 12)]),
+            phrase("alpha", 0.5, vec![(0, 1)]),
+            phrase("gamma", 0.5, vec![(0, 3)]),  // same pos as alpha, longer
+            phrase("beta", 0.8, vec![(5, 7)]),
+        ];
+        phrases.sort_by(|a, b| a.stable_cmp(b));
+
+        assert_eq!(phrases[0].lemma, "beta");  // highest score (0.8)
+        assert_eq!(phrases[1].lemma, "alpha"); // score 0.5, pos 0, len 1
+        assert_eq!(phrases[2].lemma, "gamma"); // score 0.5, pos 0, len 3
+        assert_eq!(phrases[3].lemma, "delta"); // lowest score (0.3)
     }
 }

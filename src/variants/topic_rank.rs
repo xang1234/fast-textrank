@@ -123,8 +123,12 @@ impl TopicRank {
         // Select best phrase from each top cluster
         let mut phrases = self.select_representatives(&cluster_members, &candidates, &pagerank);
 
-        // Sort by score
-        phrases.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap());
+        // Sort by score (with stable tie-breakers in deterministic mode).
+        if self.config.determinism.is_deterministic() {
+            phrases.sort_by(|a, b| a.stable_cmp(b));
+        } else {
+            phrases.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap());
+        }
 
         // Assign ranks
         for (i, phrase) in phrases.iter_mut().enumerate() {

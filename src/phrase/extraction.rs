@@ -76,8 +76,12 @@ impl PhraseExtractor {
         // Group variants and create phrases with canonical forms
         let mut phrases = self.group_phrases(deduped);
 
-        // Sort by score descending
-        phrases.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap());
+        // Sort by score descending (with stable tie-breakers in deterministic mode).
+        if self.config.determinism.is_deterministic() {
+            phrases.sort_by(|a, b| a.stable_cmp(b));
+        } else {
+            phrases.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap());
+        }
 
         // Assign ranks
         for (i, phrase) in phrases.iter_mut().enumerate() {

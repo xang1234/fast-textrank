@@ -193,7 +193,11 @@ impl MultipartiteRank {
             })
             .collect();
 
-        phrases.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap());
+        if self.config.determinism.is_deterministic() {
+            phrases.sort_by(|a, b| a.stable_cmp(b));
+        } else {
+            phrases.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap());
+        }
 
         for (i, phrase) in phrases.iter_mut().enumerate() {
             phrase.rank = i + 1;
