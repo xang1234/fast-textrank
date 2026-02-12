@@ -1561,15 +1561,15 @@ impl ResultFormatter for StandardResultFormatter {
         phrases: &PhraseSet,
         ranks: &RankOutput,
         debug: Option<DebugPayload>,
-        _cfg: &TextRankConfig,
+        cfg: &TextRankConfig,
     ) -> FormattedResult {
         use crate::types::Phrase;
 
-        let formatted_phrases: Vec<Phrase> = phrases
+        // --- 1. Convert PhraseEntry → Phrase (rank=0 placeholder) ---
+        let mut formatted_phrases: Vec<Phrase> = phrases
             .entries()
             .iter()
-            .enumerate()
-            .map(|(idx, entry)| {
+            .map(|entry| {
                 let text = entry.surface.clone().unwrap_or_default();
                 let lemma = entry.lemma_text.clone().unwrap_or_default();
                 let offsets = entry
@@ -1589,10 +1589,23 @@ impl ResultFormatter for StandardResultFormatter {
                     score: entry.score,
                     count: entry.count as usize,
                     offsets,
-                    rank: idx + 1, // 1-indexed rank
+                    rank: 0, // assigned after sorting
                 }
             })
             .collect();
+
+        // --- 2. Sort (authoritative — the formatter is the canonical sort) ---
+        if cfg.determinism.is_deterministic() {
+            formatted_phrases.sort_by(|a, b| a.stable_cmp(b));
+        } else {
+            formatted_phrases
+                .sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
+        }
+
+        // --- 3. Assign 1-indexed ranks after sorting ---
+        for (i, phrase) in formatted_phrases.iter_mut().enumerate() {
+            phrase.rank = i + 1;
+        }
 
         let result = FormattedResult::new(
             formatted_phrases,
@@ -6192,6 +6205,244 @@ mod tests {
             assert!(p.score > 0.0, "All phrases should have positive scores");
             assert!(!p.text.is_empty(), "All phrases should have surface text");
             assert!(p.rank > 0, "Ranks should be 1-indexed");
+        }
+    }
+
+    // ================================================================
+    // StandardResultFormatter — deterministic tie-breaking tests
+    // ================================================================
+
+    #[test]
+    fn test_standard_formatter_sorts_by_score_descending() {
+        use crate::pipeline::artifacts::PhraseEntry;
+
+        // Deliberately unsorted entries: lower score first.
+        let entries = vec![
+            PhraseEntry {
+                lemma_ids: vec![0],
+                score: 0.3,
+                count: 1,
+                surface: Some("low".to_string()),
+                lemma_text: Some("low".to_string()),
+                spans: Some(vec![(0, 3)]),
+            },
+            PhraseEntry {
+                lemma_ids: vec![1],
+                score: 0.9,
+                count: 1,
+                surface: Some("high".to_string()),
+                lemma_text: Some("high".to_string()),
+                spans: Some(vec![(4, 8)]),
+            },
+        ];
+        let phrases = PhraseSet::from_entries(entries);
+        let ranks = RankOutput::from_pagerank_result(
+            &crate::pagerank::PageRankResult {
+                scores: vec![0.3, 0.9],
+                iterations: 10,
+                delta: 1e-7,
+                converged: true,
+            },
+        );
+        let cfg = TextRankConfig::default();
+
+        let result = StandardResultFormatter.format(&phrases, &ranks, None, &cfg);
+
+        assert_eq!(result.phrases[0].text, "high");
+        assert_eq!(result.phrases[1].text, "low");
+        assert_eq!(result.phrases[0].rank, 1);
+        assert_eq!(result.phrases[1].rank, 2);
+    }
+
+    #[test]
+    fn test_standard_formatter_deterministic_tiebreak_position() {
+        use crate::pipeline::artifacts::PhraseEntry;
+        use crate::types::DeterminismMode;
+
+        // Two entries with identical scores — earlier position wins.
+        let entries = vec![
+            PhraseEntry {
+                lemma_ids: vec![1],
+                score: 0.5,
+                count: 1,
+                surface: Some("later".to_string()),
+                lemma_text: Some("later".to_string()),
+                spans: Some(vec![(10, 15)]),
+            },
+            PhraseEntry {
+                lemma_ids: vec![0],
+                score: 0.5,
+                count: 1,
+                surface: Some("earlier".to_string()),
+                lemma_text: Some("earlier".to_string()),
+                spans: Some(vec![(0, 7)]),
+            },
+        ];
+        let phrases = PhraseSet::from_entries(entries);
+        let ranks = RankOutput::from_pagerank_result(
+            &crate::pagerank::PageRankResult {
+                scores: vec![0.5, 0.5],
+                iterations: 10,
+                delta: 1e-7,
+                converged: true,
+            },
+        );
+        let mut cfg = TextRankConfig::default();
+        cfg.determinism = DeterminismMode::Deterministic;
+
+        let result = StandardResultFormatter.format(&phrases, &ranks, None, &cfg);
+
+        assert_eq!(
+            result.phrases[0].text, "earlier",
+            "Earlier position should rank first on score tie"
+        );
+        assert_eq!(result.phrases[1].text, "later");
+    }
+
+    #[test]
+    fn test_standard_formatter_deterministic_tiebreak_length() {
+        use crate::pipeline::artifacts::PhraseEntry;
+        use crate::types::DeterminismMode;
+
+        // Two entries with identical scores and same start position —
+        // shorter phrase length wins.
+        let entries = vec![
+            PhraseEntry {
+                lemma_ids: vec![0, 1, 2],
+                score: 0.5,
+                count: 1,
+                surface: Some("machine learning model".to_string()),
+                lemma_text: Some("machine learning model".to_string()),
+                spans: Some(vec![(0, 22)]),
+            },
+            PhraseEntry {
+                lemma_ids: vec![0, 1],
+                score: 0.5,
+                count: 1,
+                surface: Some("machine learning".to_string()),
+                lemma_text: Some("machine learning".to_string()),
+                spans: Some(vec![(0, 16)]),
+            },
+        ];
+        let phrases = PhraseSet::from_entries(entries);
+        let ranks = RankOutput::from_pagerank_result(
+            &crate::pagerank::PageRankResult {
+                scores: vec![0.5, 0.5],
+                iterations: 10,
+                delta: 1e-7,
+                converged: true,
+            },
+        );
+        let mut cfg = TextRankConfig::default();
+        cfg.determinism = DeterminismMode::Deterministic;
+
+        let result = StandardResultFormatter.format(&phrases, &ranks, None, &cfg);
+
+        assert_eq!(
+            result.phrases[0].text, "machine learning",
+            "Shorter phrase should rank first when score and position tie"
+        );
+        assert_eq!(result.phrases[1].text, "machine learning model");
+    }
+
+    #[test]
+    fn test_standard_formatter_deterministic_tiebreak_lemma() {
+        use crate::pipeline::artifacts::PhraseEntry;
+        use crate::types::DeterminismMode;
+
+        // Two entries with identical scores, same position, same span length —
+        // lexicographic lemma ascending wins.
+        let entries = vec![
+            PhraseEntry {
+                lemma_ids: vec![1],
+                score: 0.5,
+                count: 1,
+                surface: Some("zebra".to_string()),
+                lemma_text: Some("zebra".to_string()),
+                spans: Some(vec![(0, 5)]),
+            },
+            PhraseEntry {
+                lemma_ids: vec![0],
+                score: 0.5,
+                count: 1,
+                surface: Some("alpha".to_string()),
+                lemma_text: Some("alpha".to_string()),
+                spans: Some(vec![(0, 5)]),
+            },
+        ];
+        let phrases = PhraseSet::from_entries(entries);
+        let ranks = RankOutput::from_pagerank_result(
+            &crate::pagerank::PageRankResult {
+                scores: vec![0.5, 0.5],
+                iterations: 10,
+                delta: 1e-7,
+                converged: true,
+            },
+        );
+        let mut cfg = TextRankConfig::default();
+        cfg.determinism = DeterminismMode::Deterministic;
+
+        let result = StandardResultFormatter.format(&phrases, &ranks, None, &cfg);
+
+        assert_eq!(
+            result.phrases[0].text, "alpha",
+            "Lexicographically earlier lemma should rank first on full tie"
+        );
+        assert_eq!(result.phrases[1].text, "zebra");
+    }
+
+    #[test]
+    fn test_standard_formatter_deterministic_is_idempotent() {
+        use crate::pipeline::artifacts::PhraseEntry;
+        use crate::types::DeterminismMode;
+
+        // Run the formatter twice on the same input — results must be identical.
+        let entries = vec![
+            PhraseEntry {
+                lemma_ids: vec![0],
+                score: 0.5,
+                count: 1,
+                surface: Some("b_word".to_string()),
+                lemma_text: Some("b_word".to_string()),
+                spans: Some(vec![(5, 11)]),
+            },
+            PhraseEntry {
+                lemma_ids: vec![1],
+                score: 0.5,
+                count: 2,
+                surface: Some("a_word".to_string()),
+                lemma_text: Some("a_word".to_string()),
+                spans: Some(vec![(0, 6)]),
+            },
+            PhraseEntry {
+                lemma_ids: vec![2],
+                score: 0.7,
+                count: 1,
+                surface: Some("top".to_string()),
+                lemma_text: Some("top".to_string()),
+                spans: Some(vec![(12, 15)]),
+            },
+        ];
+        let phrases = PhraseSet::from_entries(entries);
+        let ranks = RankOutput::from_pagerank_result(
+            &crate::pagerank::PageRankResult {
+                scores: vec![0.5, 0.5, 0.7],
+                iterations: 10,
+                delta: 1e-7,
+                converged: true,
+            },
+        );
+        let mut cfg = TextRankConfig::default();
+        cfg.determinism = DeterminismMode::Deterministic;
+
+        let r1 = StandardResultFormatter.format(&phrases, &ranks, None, &cfg);
+        let r2 = StandardResultFormatter.format(&phrases, &ranks, None, &cfg);
+
+        assert_eq!(r1.phrases.len(), r2.phrases.len());
+        for (a, b) in r1.phrases.iter().zip(r2.phrases.iter()) {
+            assert_eq!(a.text, b.text, "Deterministic formatter must be idempotent");
+            assert_eq!(a.rank, b.rank);
+            assert!((a.score - b.score).abs() < 1e-15);
         }
     }
 
