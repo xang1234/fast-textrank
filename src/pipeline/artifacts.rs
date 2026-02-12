@@ -84,6 +84,15 @@ pub struct TokenStream {
 }
 
 impl TokenStream {
+    /// Construct directly from entries and a pool (for tests and stage impls).
+    pub fn new(tokens: Vec<TokenEntry>, pool: StringPool) -> Self {
+        Self {
+            pool,
+            tokens,
+            sentence_offsets: Vec::new(),
+        }
+    }
+
     /// Build a `TokenStream` from the legacy `Token` slice.
     ///
     /// This is the primary bridge between the existing tokenizer / JSON
@@ -435,6 +444,13 @@ pub struct CandidateSet {
 }
 
 impl CandidateSet {
+    /// Empty candidate set (word-level, zero candidates).
+    pub fn empty() -> Self {
+        Self {
+            kind: CandidateKind::Words(Vec::new()),
+        }
+    }
+
     /// Construct from a pre-built [`CandidateKind`].
     ///
     /// This is the low-level constructor used by [`CandidateSelector`]
@@ -661,6 +677,23 @@ pub struct Graph {
 }
 
 impl Graph {
+    /// Empty graph (zero nodes, zero edges).
+    pub fn empty() -> Self {
+        Self {
+            csr: crate::graph::csr::CsrGraph {
+                num_nodes: 0,
+                row_ptr: vec![0],
+                col_idx: Vec::new(),
+                weights: Vec::new(),
+                out_degree: Vec::new(),
+                total_weight: Vec::new(),
+                lemmas: Vec::new(),
+                lemma_to_id: Default::default(),
+            },
+            transformed: false,
+        }
+    }
+
     /// Build from an existing [`GraphBuilder`].
     ///
     /// This is the primary construction path — the existing graph builder
@@ -1090,6 +1123,13 @@ pub struct PhraseSet {
 }
 
 impl PhraseSet {
+    /// Empty phrase set (zero phrases).
+    pub fn empty() -> Self {
+        Self {
+            entries: Vec::new(),
+        }
+    }
+
     /// Construct from the existing `Vec<Phrase>` type.
     ///
     /// Interns lemma tokens via the provided pool and eagerly stores the

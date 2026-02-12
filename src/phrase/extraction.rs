@@ -5,7 +5,6 @@
 
 use super::chunker::{chunk_lemma, chunk_text, NounChunker};
 use super::dedup::{resolve_overlaps_greedy, ScoredChunk};
-use crate::graph::builder::GraphBuilder;
 use crate::graph::csr::CsrGraph;
 use crate::pagerank::PageRankResult;
 use crate::types::{Phrase, PhraseGrouping, ScoreAggregation, TextRankConfig, Token};
@@ -226,48 +225,49 @@ pub fn extract_keyphrases(tokens: &[Token], config: &TextRankConfig) -> Vec<Phra
     extract_keyphrases_with_info(tokens, config).phrases
 }
 
-/// Extract phrases with PageRank convergence information
+/// Extract phrases with PageRank convergence information.
+///
+/// Internally delegates to the modular pipeline ([`Pipeline`]) with the
+/// default BaseTextRank stage composition:
+///
+/// 1. Word-level candidate selection (POS + stopword filtering)
+/// 2. Sentence-bounded co-occurrence graph
+/// 3. Standard PageRank
+/// 4. Chunk-based phrase extraction
+/// 5. Standard result formatting
+///
+/// The `use_edge_weights` config field controls edge weight policy:
+/// `true` → count-accumulating, `false` → binary.
+///
+/// [`Pipeline`]: crate::pipeline::Pipeline
 pub fn extract_keyphrases_with_info(tokens: &[Token], config: &TextRankConfig) -> ExtractionResult {
-    // Build graph with POS filtering
-    let include_pos = if config.include_pos.is_empty() {
-        None
-    } else {
-        Some(config.include_pos.as_slice())
+    use crate::pipeline::{
+        CooccurrenceGraphBuilder, EdgeWeightPolicy, NoopObserver, PipelineBuilder, TokenStream,
+        WindowStrategy,
     };
-    let builder = GraphBuilder::from_tokens_with_pos(
-        tokens,
-        config.window_size,
-        config.use_edge_weights,
-        include_pos,
-        config.use_pos_in_nodes,
-    );
 
-    if builder.is_empty() {
-        return ExtractionResult {
-            phrases: Vec::new(),
-            converged: true,
-            iterations: 0,
-        };
-    }
+    let stream = TokenStream::from_tokens(tokens);
 
-    // Convert to CSR
-    let graph = CsrGraph::from_builder(&builder);
+    let graph_builder = CooccurrenceGraphBuilder {
+        window_strategy: WindowStrategy::SentenceBounded,
+        edge_weight_policy: if config.use_edge_weights {
+            EdgeWeightPolicy::Count
+        } else {
+            EdgeWeightPolicy::Binary
+        },
+    };
 
-    // Run PageRank
-    let pagerank = crate::pagerank::standard::StandardPageRank::new()
-        .with_damping(config.damping)
-        .with_max_iterations(config.max_iterations)
-        .with_threshold(config.convergence_threshold)
-        .run(&graph);
+    let pipeline = PipelineBuilder::new()
+        .graph_builder(graph_builder)
+        .build();
 
-    // Extract phrases
-    let extractor = PhraseExtractor::with_config(config.clone());
-    let phrases = extractor.extract(tokens, &graph, &pagerank);
+    let mut observer = NoopObserver;
+    let result = pipeline.run(stream, config, &mut observer);
 
     ExtractionResult {
-        phrases,
-        converged: pagerank.converged,
-        iterations: pagerank.iterations,
+        phrases: result.phrases,
+        converged: result.converged,
+        iterations: result.iterations as usize,
     }
 }
 
@@ -348,5 +348,191 @@ mod tests {
         let phrases = extract_keyphrases(&tokens, &config);
 
         assert!(phrases.len() <= 2);
+    }
+
+    // ================================================================
+    // Golden test helpers
+    // ================================================================
+
+    /// Multi-sentence document for golden tests.
+    ///
+    /// "Machine learning uses algorithms. Deep learning uses neural networks.
+    ///  Machine learning models improve with data."
+    ///
+    /// Properties:
+    /// - 3 sentences, repeated terms ("machine", "learning", "uses")
+    /// - Mixed POS (nouns, verbs, prepositions)
+    /// - Stopwords ("with")
+    /// - Cross-sentence term overlap for richer graph connectivity
+    fn golden_tokens() -> Vec<Token> {
+        let mut tokens = vec![
+            // Sentence 0: "Machine learning uses algorithms"
+            Token::new("Machine", "machine", PosTag::Noun, 0, 7, 0, 0),
+            Token::new("learning", "learning", PosTag::Noun, 8, 16, 0, 1),
+            Token::new("uses", "use", PosTag::Verb, 17, 21, 0, 2),
+            Token::new("algorithms", "algorithm", PosTag::Noun, 22, 32, 0, 3),
+            // Sentence 1: "Deep learning uses neural networks"
+            Token::new("Deep", "deep", PosTag::Adjective, 34, 38, 1, 4),
+            Token::new("learning", "learning", PosTag::Noun, 39, 47, 1, 5),
+            Token::new("uses", "use", PosTag::Verb, 48, 52, 1, 6),
+            Token::new("neural", "neural", PosTag::Adjective, 53, 59, 1, 7),
+            Token::new("networks", "network", PosTag::Noun, 60, 68, 1, 8),
+            // Sentence 2: "Machine learning models improve with data"
+            Token::new("Machine", "machine", PosTag::Noun, 70, 77, 2, 9),
+            Token::new("learning", "learning", PosTag::Noun, 78, 86, 2, 10),
+            Token::new("models", "model", PosTag::Noun, 87, 93, 2, 11),
+            Token::new("improve", "improve", PosTag::Verb, 94, 101, 2, 12),
+            Token::new("with", "with", PosTag::Preposition, 102, 106, 2, 13),
+            Token::new("data", "data", PosTag::Noun, 107, 111, 2, 14),
+        ];
+        // Mark stopwords
+        tokens[13].is_stopword = true; // "with"
+        tokens
+    }
+
+    // ================================================================
+    // Golden tests — BaseTextRank pipeline regression suite
+    // ================================================================
+
+    /// Verify score within epsilon tolerance.
+    fn assert_score(actual: f64, expected: f64, phrase: &str) {
+        let eps = 1e-8;
+        assert!(
+            (actual - expected).abs() < eps,
+            "Score mismatch for {:?}: got {:.10}, expected {:.10} (delta {:.2e})",
+            phrase,
+            actual,
+            expected,
+            (actual - expected).abs()
+        );
+    }
+
+    /// Golden test: single-sentence document.
+    ///
+    /// Input: "Machine learning is a subset of artificial intelligence"
+    /// Expected: 3 phrases, converged in 9 iterations.
+    #[test]
+    fn golden_base_textrank_single_sentence() {
+        let tokens = make_tokens();
+        let config = TextRankConfig::default();
+        let result = extract_keyphrases_with_info(&tokens, &config);
+
+        // Convergence
+        assert!(result.converged);
+        assert_eq!(result.iterations, 9);
+
+        // Phrase count
+        assert_eq!(result.phrases.len(), 3);
+
+        // Phrase ordering (score descending)
+        assert_eq!(result.phrases[0].text, "Machine learning");
+        assert_eq!(result.phrases[1].text, "artificial intelligence");
+        assert_eq!(result.phrases[2].text, "subset");
+
+        // Lemmas
+        assert_eq!(result.phrases[0].lemma, "machine learning");
+        assert_eq!(result.phrases[1].lemma, "artificial intelligence");
+        assert_eq!(result.phrases[2].lemma, "subset");
+
+        // Scores (within epsilon)
+        assert_score(result.phrases[0].score, 0.2846505870, "Machine learning");
+        assert_score(result.phrases[1].score, 0.2846505870, "artificial intelligence");
+        assert_score(result.phrases[2].score, 0.2153494130, "subset");
+
+        // Ranks (1-indexed)
+        assert_eq!(result.phrases[0].rank, 1);
+        assert_eq!(result.phrases[1].rank, 2);
+        assert_eq!(result.phrases[2].rank, 3);
+    }
+
+    /// Golden test: multi-sentence document with repeated terms.
+    ///
+    /// Input: "Machine learning uses algorithms. Deep learning uses neural
+    ///         networks. Machine learning models improve with data."
+    /// Expected: 6 phrases, converged in 21 iterations.
+    #[test]
+    fn golden_base_textrank_multi_sentence() {
+        let tokens = golden_tokens();
+        let config = TextRankConfig::default();
+        let result = extract_keyphrases_with_info(&tokens, &config);
+
+        // Convergence
+        assert!(result.converged);
+        assert_eq!(result.iterations, 21);
+
+        // Phrase count
+        assert_eq!(result.phrases.len(), 6);
+
+        // Top-5 phrase ordering (score descending)
+        let texts: Vec<&str> = result.phrases.iter().map(|p| p.text.as_str()).collect();
+        assert_eq!(
+            texts,
+            vec![
+                "Machine learning models",
+                "Machine learning",
+                "Deep learning",
+                "neural networks",
+                "data",
+                "algorithms",
+            ]
+        );
+
+        // Scores (within epsilon)
+        assert_score(result.phrases[0].score, 0.4249608102, "Machine learning models");
+        assert_score(result.phrases[1].score, 0.3179496860, "Machine learning");
+        assert_score(result.phrases[2].score, 0.2746293119, "Deep learning");
+        assert_score(result.phrases[3].score, 0.1412982971, "neural networks");
+        assert_score(result.phrases[4].score, 0.0616928699, "data");
+        assert_score(result.phrases[5].score, 0.0567178525, "algorithms");
+
+        // Ranks are 1-indexed and sequential
+        for (i, p) in result.phrases.iter().enumerate() {
+            assert_eq!(p.rank, i + 1, "rank mismatch at position {}", i);
+        }
+    }
+
+    /// Golden test: top_n limiting on multi-sentence document.
+    #[test]
+    fn golden_base_textrank_top_n_3() {
+        let tokens = golden_tokens();
+        let config = TextRankConfig::default().with_top_n(3);
+        let result = extract_keyphrases_with_info(&tokens, &config);
+
+        assert!(result.converged);
+        assert_eq!(result.phrases.len(), 3);
+
+        // Top-3 ordering is stable
+        assert_eq!(result.phrases[0].text, "Machine learning models");
+        assert_eq!(result.phrases[1].text, "Machine learning");
+        assert_eq!(result.phrases[2].text, "Deep learning");
+    }
+
+    /// Golden test: empty input produces empty output.
+    #[test]
+    fn golden_base_textrank_empty() {
+        let tokens: Vec<Token> = Vec::new();
+        let config = TextRankConfig::default();
+        let result = extract_keyphrases_with_info(&tokens, &config);
+
+        assert!(result.converged);
+        assert_eq!(result.iterations, 0);
+        assert!(result.phrases.is_empty());
+    }
+
+    /// Golden test: convergence metadata is propagated.
+    #[test]
+    fn golden_base_textrank_convergence_metadata() {
+        let tokens = golden_tokens();
+        let config = TextRankConfig {
+            max_iterations: 1, // Force early termination
+            ..TextRankConfig::default()
+        };
+        let result = extract_keyphrases_with_info(&tokens, &config);
+
+        // With only 1 iteration, PageRank should NOT converge on a non-trivial graph.
+        assert!(!result.converged);
+        assert_eq!(result.iterations, 1);
+        // Should still produce phrases (just with less-converged scores).
+        assert!(!result.phrases.is_empty());
     }
 }

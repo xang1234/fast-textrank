@@ -27,6 +27,16 @@ pub use artifacts::{
     WordCandidate,
 };
 
+// Re-export observer types.
+pub use observer::{
+    NoopObserver, PipelineObserver, StageClock, StageReport, StageReportBuilder,
+    StageTimingObserver, STAGE_CANDIDATES, STAGE_FORMAT, STAGE_GRAPH, STAGE_GRAPH_TRANSFORM,
+    STAGE_PHRASES, STAGE_PREPROCESS, STAGE_RANK, STAGE_TELEPORT,
+};
+
+// Re-export runner types (Pipeline, builder, type alias).
+pub use runner::{BaseTextRankPipeline, Pipeline, PipelineBuilder};
+
 // Re-export stage traits and default implementations.
 pub use traits::{
     CandidateSelector, ChunkPhraseBuilder, CooccurrenceGraphBuilder, EdgeWeightPolicy,
