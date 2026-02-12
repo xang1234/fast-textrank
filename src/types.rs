@@ -278,7 +278,7 @@ impl ChunkSpan {
 }
 
 /// An extracted phrase with its score and metadata
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Phrase {
     /// The canonical surface form
     pub text: String,

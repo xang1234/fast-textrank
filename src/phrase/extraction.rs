@@ -226,7 +226,7 @@ impl PhraseExtractor {
 }
 
 /// Result of keyphrase extraction including convergence info
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct ExtractionResult {
     /// Extracted phrases
     pub phrases: Vec<Phrase>,
