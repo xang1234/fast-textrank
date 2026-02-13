@@ -7,9 +7,9 @@ use crate::phrase::chunker::NounChunker;
 use crate::phrase::extraction::extract_keyphrases_with_info;
 use crate::pipeline::artifacts::TokenStream;
 use crate::pipeline::observer::NoopObserver;
-use crate::pipeline::spec::{PipelineSpec, PipelineSpecV1};
+use crate::pipeline::spec::{resolve_spec, PipelineSpec, PipelineSpecV1};
 use crate::pipeline::spec_builder::SpecPipelineBuilder;
-use crate::pipeline::validation::{ValidationEngine, ValidationReport};
+use crate::pipeline::validation::{ValidationDiagnostic, ValidationEngine, ValidationReport};
 use crate::types::{DeterminismMode, PhraseGrouping, PosTag, ScoreAggregation, TextRankConfig, Token};
 use crate::variants::biased_textrank::BiasedTextRank;
 use crate::variants::multipartite_rank::MultipartiteRank;
@@ -362,14 +362,14 @@ pub fn extract_from_json(py: Python<'_>, json_input: &str) -> PyResult<String> {
                 "validate_only requires a 'pipeline' field",
             )
         })?;
-        let response = match &pipeline_spec {
-            PipelineSpec::V1(v1) => validate_spec_impl(v1),
-            PipelineSpec::Preset(name) => {
-                return Err(pyo3::exceptions::PyValueError::new_err(format!(
-                    "Preset pipeline '{}' resolution is not yet implemented",
-                    name
-                )));
-            }
+        let response = match resolve_spec(&pipeline_spec) {
+            Ok(resolved) => validate_spec_impl(&resolved),
+            Err(err) => ValidationResponse {
+                valid: false,
+                report: ValidationReport {
+                    diagnostics: vec![ValidationDiagnostic::error(err)],
+                },
+            },
         };
         return serde_json::to_string(&response)
             .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()));
@@ -723,7 +723,8 @@ mod tests {
 
     #[test]
     fn test_validate_only_document_with_preset_pipeline_spec() {
-        // A string pipeline value now parses as PipelineSpec::Preset
+        // A string pipeline value parses as PipelineSpec::Preset
+        // and resolves + validates successfully
         let doc: JsonDocument = serde_json::from_str(r#"{
             "validate_only": true,
             "pipeline": "textrank"
@@ -731,6 +732,11 @@ mod tests {
         assert!(doc.validate_only);
         let spec = doc.pipeline.unwrap();
         assert!(spec.is_preset());
+
+        // After resolve_spec, validation should succeed
+        let resolved = resolve_spec(&spec).unwrap();
+        let resp = validate_spec_impl(&resolved);
+        assert!(resp.valid);
     }
 
     #[test]
@@ -1260,5 +1266,57 @@ mod tests {
 
         assert!(result.converged);
         assert!(!result.phrases.is_empty());
+    }
+
+    // ─── Preset validation (textranker-04a.6) ──────────────────────────
+
+    #[test]
+    fn test_validate_only_preset_resolves_and_validates() {
+        // "textrank" preset should resolve to a valid V1 spec
+        let spec = PipelineSpec::Preset("textrank".into());
+        let resolved = resolve_spec(&spec).unwrap();
+        let resp = validate_spec_impl(&resolved);
+        assert!(resp.valid);
+        assert_eq!(resp.report.len(), 0);
+    }
+
+    #[test]
+    fn test_validate_only_invalid_preset_returns_error_response() {
+        // An invalid preset should produce a ValidationResponse (not a panic/exception)
+        let spec = PipelineSpec::Preset("nonexistent".into());
+        let response = match resolve_spec(&spec) {
+            Ok(resolved) => validate_spec_impl(&resolved),
+            Err(err) => ValidationResponse {
+                valid: false,
+                report: ValidationReport {
+                    diagnostics: vec![ValidationDiagnostic::error(err)],
+                },
+            },
+        };
+        assert!(!response.valid);
+        let json = serde_json::to_value(&response).unwrap();
+        let diags = json["diagnostics"].as_array().unwrap();
+        assert_eq!(diags.len(), 1);
+        assert_eq!(diags[0]["code"], "invalid_value");
+        assert!(diags[0]["message"].as_str().unwrap().contains("nonexistent"));
+    }
+
+    #[test]
+    fn test_validate_only_v1_with_preset_resolves_before_validation() {
+        // V1 spec with a preset field should merge then validate
+        let spec = PipelineSpec::V1(PipelineSpecV1 {
+            v: 1,
+            preset: Some("position_rank".into()),
+            modules: crate::pipeline::spec::ModuleSet::default(),
+            runtime: crate::pipeline::spec::RuntimeSpec::default(),
+            expose: None,
+            strict: false,
+            unknown_fields: std::collections::HashMap::new(),
+        });
+        let resolved = resolve_spec(&spec).unwrap();
+        let resp = validate_spec_impl(&resolved);
+        assert!(resp.valid);
+        // Should have position teleport from the preset
+        assert!(resolved.modules.teleport.is_some());
     }
 }
