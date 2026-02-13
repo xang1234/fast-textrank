@@ -8,6 +8,7 @@
 //! the pipeline retains ownership of the corresponding owned artifacts.
 
 use crate::types::{PosTag, StringPool, Token};
+use serde::{Deserialize, Serialize};
 
 // ============================================================================
 // TokenStream — interned, compact token representation
@@ -1469,6 +1470,105 @@ pub struct FormattedResult {
     pub debug: Option<DebugPayload>,
 }
 
+// ============================================================================
+// DebugLevel — tiered debug output control
+// ============================================================================
+
+/// Controls how much debug information is attached to a [`FormattedResult`].
+///
+/// Each level is a strict superset of the previous one:
+///
+/// | Level      | Includes                                                         |
+/// |------------|------------------------------------------------------------------|
+/// | `None`     | Nothing (default — zero overhead).                               |
+/// | `Stats`    | Graph statistics + convergence summary (nodes, edges, iters).    |
+/// | `TopNodes` | Stats + top-K node scores (bounded by `max_debug_top_k`).        |
+/// | `Full`     | TopNodes + convergence residuals + bounded adjacency samples.    |
+///
+/// The ordering derives from variant declaration order, so
+/// `DebugLevel::Stats >= DebugLevel::None` holds naturally via [`Ord`].
+///
+/// # Examples
+///
+/// ```
+/// use rapid_textrank::pipeline::artifacts::DebugLevel;
+///
+/// let level = DebugLevel::TopNodes;
+/// assert!(level.includes_stats());
+/// assert!(level.includes_node_scores());
+/// assert!(!level.includes_full());
+/// ```
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DebugLevel {
+    /// No debug output (default). Zero overhead on the hot path.
+    #[default]
+    None,
+    /// Graph statistics (node/edge counts) and convergence summary
+    /// (iterations, converged flag, final delta).
+    Stats,
+    /// Everything in [`Stats`](DebugLevel::Stats), plus the top-K node
+    /// scores (bounded by `max_debug_top_k` from [`RuntimeSpec`]).
+    TopNodes,
+    /// Everything in [`TopNodes`](DebugLevel::TopNodes), plus convergence
+    /// residuals per iteration and bounded adjacency samples. Use with
+    /// caution on large graphs — output is bounded but can still be
+    /// substantial.
+    Full,
+}
+
+impl DebugLevel {
+    /// Returns `true` when any debug output is requested (level > `None`).
+    #[inline]
+    pub fn is_enabled(self) -> bool {
+        self > DebugLevel::None
+    }
+
+    /// Returns `true` when graph stats and convergence summary are included.
+    #[inline]
+    pub fn includes_stats(self) -> bool {
+        self >= DebugLevel::Stats
+    }
+
+    /// Returns `true` when top-K node scores are included.
+    #[inline]
+    pub fn includes_node_scores(self) -> bool {
+        self >= DebugLevel::TopNodes
+    }
+
+    /// Returns `true` when full diagnostics (residuals, adjacency) are included.
+    #[inline]
+    pub fn includes_full(self) -> bool {
+        self >= DebugLevel::Full
+    }
+}
+
+impl DebugLevel {
+    /// String representation matching the serde/JSON contract.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            DebugLevel::None => "none",
+            DebugLevel::Stats => "stats",
+            DebugLevel::TopNodes => "top_nodes",
+            DebugLevel::Full => "full",
+        }
+    }
+
+    /// Parse from a string (case-insensitive).
+    pub fn from_str(s: &str) -> Option<Self> {
+        match s.to_ascii_lowercase().as_str() {
+            "none" => Some(DebugLevel::None),
+            "stats" => Some(DebugLevel::Stats),
+            "top_nodes" | "topnodes" => Some(DebugLevel::TopNodes),
+            "full" => Some(DebugLevel::Full),
+            _ => None,
+        }
+    }
+
+    /// Default top-K limit for node scores when no explicit limit is set.
+    pub const DEFAULT_TOP_K: usize = 50;
+}
+
 /// Optional debug information attached to a [`FormattedResult`].
 ///
 /// Power users can request this via the `expose` config key.  Fields are
@@ -2709,5 +2809,117 @@ mod tests {
         let clusters = vec![vec![0], vec![1], vec![2]];
         let ca = ClusterAssignments::from_cluster_vecs(&clusters, 3);
         assert_eq!(ca.as_slice(), &[0, 1, 2]);
+    }
+
+    // ================================================================
+    // DebugLevel tests
+    // ================================================================
+
+    #[test]
+    fn test_debug_level_default_is_none() {
+        assert_eq!(DebugLevel::default(), DebugLevel::None);
+    }
+
+    #[test]
+    fn test_debug_level_ordering() {
+        assert!(DebugLevel::None < DebugLevel::Stats);
+        assert!(DebugLevel::Stats < DebugLevel::TopNodes);
+        assert!(DebugLevel::TopNodes < DebugLevel::Full);
+    }
+
+    #[test]
+    fn test_debug_level_is_enabled() {
+        assert!(!DebugLevel::None.is_enabled());
+        assert!(DebugLevel::Stats.is_enabled());
+        assert!(DebugLevel::TopNodes.is_enabled());
+        assert!(DebugLevel::Full.is_enabled());
+    }
+
+    #[test]
+    fn test_debug_level_includes_stats() {
+        assert!(!DebugLevel::None.includes_stats());
+        assert!(DebugLevel::Stats.includes_stats());
+        assert!(DebugLevel::TopNodes.includes_stats());
+        assert!(DebugLevel::Full.includes_stats());
+    }
+
+    #[test]
+    fn test_debug_level_includes_node_scores() {
+        assert!(!DebugLevel::None.includes_node_scores());
+        assert!(!DebugLevel::Stats.includes_node_scores());
+        assert!(DebugLevel::TopNodes.includes_node_scores());
+        assert!(DebugLevel::Full.includes_node_scores());
+    }
+
+    #[test]
+    fn test_debug_level_includes_full() {
+        assert!(!DebugLevel::None.includes_full());
+        assert!(!DebugLevel::Stats.includes_full());
+        assert!(!DebugLevel::TopNodes.includes_full());
+        assert!(DebugLevel::Full.includes_full());
+    }
+
+    #[test]
+    fn test_debug_level_as_str() {
+        assert_eq!(DebugLevel::None.as_str(), "none");
+        assert_eq!(DebugLevel::Stats.as_str(), "stats");
+        assert_eq!(DebugLevel::TopNodes.as_str(), "top_nodes");
+        assert_eq!(DebugLevel::Full.as_str(), "full");
+    }
+
+    #[test]
+    fn test_debug_level_from_str() {
+        assert_eq!(DebugLevel::from_str("none"), Some(DebugLevel::None));
+        assert_eq!(DebugLevel::from_str("stats"), Some(DebugLevel::Stats));
+        assert_eq!(DebugLevel::from_str("top_nodes"), Some(DebugLevel::TopNodes));
+        assert_eq!(DebugLevel::from_str("topnodes"), Some(DebugLevel::TopNodes));
+        assert_eq!(DebugLevel::from_str("full"), Some(DebugLevel::Full));
+        // Case-insensitive.
+        assert_eq!(DebugLevel::from_str("STATS"), Some(DebugLevel::Stats));
+        assert_eq!(DebugLevel::from_str("Top_Nodes"), Some(DebugLevel::TopNodes));
+        // Unknown.
+        assert_eq!(DebugLevel::from_str("verbose"), None);
+        assert_eq!(DebugLevel::from_str(""), None);
+    }
+
+    #[test]
+    fn test_debug_level_serde_roundtrip() {
+        for level in [
+            DebugLevel::None,
+            DebugLevel::Stats,
+            DebugLevel::TopNodes,
+            DebugLevel::Full,
+        ] {
+            let json = serde_json::to_string(&level).unwrap();
+            let parsed: DebugLevel = serde_json::from_str(&json).unwrap();
+            assert_eq!(parsed, level, "roundtrip failed for {:?}", level);
+        }
+    }
+
+    #[test]
+    fn test_debug_level_serde_values() {
+        assert_eq!(serde_json::to_string(&DebugLevel::None).unwrap(), r#""none""#);
+        assert_eq!(serde_json::to_string(&DebugLevel::Stats).unwrap(), r#""stats""#);
+        assert_eq!(serde_json::to_string(&DebugLevel::TopNodes).unwrap(), r#""top_nodes""#);
+        assert_eq!(serde_json::to_string(&DebugLevel::Full).unwrap(), r#""full""#);
+    }
+
+    #[test]
+    fn test_debug_level_superset_property() {
+        // Each level includes everything the previous levels include.
+        let levels = [
+            DebugLevel::None,
+            DebugLevel::Stats,
+            DebugLevel::TopNodes,
+            DebugLevel::Full,
+        ];
+        for (i, &level) in levels.iter().enumerate() {
+            // stats is available from level 1+
+            assert_eq!(level.includes_stats(), i >= 1);
+            // node scores from level 2+
+            assert_eq!(level.includes_node_scores(), i >= 2);
+            // full from level 3+
+            assert_eq!(level.includes_full(), i >= 3);
+        }
     }
 }

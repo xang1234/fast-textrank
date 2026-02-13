@@ -46,7 +46,7 @@ pub use pipeline::spec::{PipelineSpec, RuntimeSpec};
 pub use pipeline::validation::{ValidationEngine, ValidationReport};
 pub use pipeline::{
     AlphaBoostWeighter, CandidateGraphBuilder, CandidateSelector, ChunkPhraseBuilder,
-    ClusterAssignments, Clusterer, CooccurrenceGraphBuilder, EdgeWeightPolicy,
+    ClusterAssignments, Clusterer, CooccurrenceGraphBuilder, DebugLevel, EdgeWeightPolicy,
     FocusTermsTeleportBuilder, IntraTopicEdgeRemover, JaccardHacClusterer, Linkage,
     MultipartitePhraseBuilder, MultipartiteRankPipeline, MultipartiteTransform, NoopClusterer,
     NoopGraphTransform, NoopPreprocessor, PhraseBuilder, TopicGraphBuilder, TopicRankPipeline,

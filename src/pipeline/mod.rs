@@ -21,7 +21,7 @@ pub mod validation;
 
 // Re-export artifact types for convenient access.
 pub use artifacts::{
-    CandidateKind, CandidateSet, CandidateSetRef, ClusterAssignments, DebugPayload,
+    CandidateKind, CandidateSet, CandidateSetRef, ClusterAssignments, DebugLevel, DebugPayload,
     FormattedResult, Graph, GraphStats, PhraseCandidate, PhraseEntry, PhraseSet, PhraseSetRef,
     PipelineWorkspace, RankDiagnostics, RankOutput, TeleportType, TeleportVector, TokenEntry,
     TokenStream, TokenStreamRef, WordCandidate,

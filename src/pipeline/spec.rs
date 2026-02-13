@@ -189,6 +189,11 @@ pub struct RuntimeSpec {
     #[serde(default)]
     pub single_thread: bool,
 
+    /// Maximum number of node scores to include in debug output.
+    /// Defaults to [`DebugLevel::DEFAULT_TOP_K`] (50) when `None`.
+    #[serde(default)]
+    pub max_debug_top_k: Option<usize>,
+
     /// Captures any fields not recognized by the schema.
     #[serde(flatten)]
     pub unknown_fields: HashMap<String, serde_json::Value>,
@@ -231,6 +236,15 @@ impl RuntimeSpec {
             Some(pool) => pool.install(f),
             None => f(),
         }
+    }
+
+    /// Resolve the effective debug top-K limit.
+    ///
+    /// Returns the explicit `max_debug_top_k` if set, otherwise
+    /// [`DebugLevel::DEFAULT_TOP_K`] (50).
+    pub fn effective_debug_top_k(&self) -> usize {
+        self.max_debug_top_k
+            .unwrap_or(crate::pipeline::artifacts::DebugLevel::DEFAULT_TOP_K)
     }
 }
 
@@ -386,5 +400,36 @@ mod tests {
         let spec: PipelineSpec = serde_json::from_str(json).unwrap();
         assert!(spec.runtime.single_thread);
         assert_eq!(spec.runtime.effective_threads(), Some(1));
+    }
+
+    // ─── RuntimeSpec debug top-K ─────────────────────────────────────
+
+    #[test]
+    fn test_effective_debug_top_k_default() {
+        let rt = RuntimeSpec::default();
+        assert_eq!(
+            rt.effective_debug_top_k(),
+            crate::pipeline::artifacts::DebugLevel::DEFAULT_TOP_K
+        );
+    }
+
+    #[test]
+    fn test_effective_debug_top_k_explicit() {
+        let rt = RuntimeSpec {
+            max_debug_top_k: Some(25),
+            ..Default::default()
+        };
+        assert_eq!(rt.effective_debug_top_k(), 25);
+    }
+
+    #[test]
+    fn test_deserialize_runtime_max_debug_top_k() {
+        let json = r#"{
+            "v": 1,
+            "runtime": { "max_debug_top_k": 100 }
+        }"#;
+        let spec: PipelineSpec = serde_json::from_str(json).unwrap();
+        assert_eq!(spec.runtime.max_debug_top_k, Some(100));
+        assert_eq!(spec.runtime.effective_debug_top_k(), 100);
     }
 }
