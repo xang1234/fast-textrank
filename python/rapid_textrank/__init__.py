@@ -18,6 +18,10 @@ from rapid_textrank._rust import (
     MultipartiteRank,
     extract_from_json,
     extract_batch_from_json,
+    extract_batch_iter,
+    extract_jsonl_from_json,
+    BatchIter,
+    validate_pipeline_spec,
     get_stopwords,
 )
 
@@ -34,6 +38,10 @@ __all__ = [
     "MultipartiteRank",
     "extract_from_json",
     "extract_batch_from_json",
+    "extract_batch_iter",
+    "extract_jsonl_from_json",
+    "BatchIter",
+    "validate_pipeline_spec",
     "get_stopwords",
     "topic_weights_from_lda",
 ]
