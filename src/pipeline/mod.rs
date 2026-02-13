@@ -36,13 +36,13 @@ pub use observer::{
 };
 
 // Re-export runner types (Pipeline, builder, type alias).
-pub use runner::{
-    BaseTextRankPipeline, BiasedTextRankPipeline, MultipartiteRankPipeline, Pipeline,
-    PipelineBuilder, PositionRankPipeline, SingleRankPipeline,
-    TopicRankPipeline, TopicalPageRankPipeline,
-};
 #[cfg(feature = "sentence-rank")]
 pub use runner::SentenceRankPipeline;
+pub use runner::{
+    BaseTextRankPipeline, BiasedTextRankPipeline, MultipartiteRankPipeline, Pipeline,
+    PipelineBuilder, PositionRankPipeline, SingleRankPipeline, TopicRankPipeline,
+    TopicalPageRankPipeline,
+};
 
 // Re-export preset resolution, spec resolution, and module merging.
 pub use spec::{merge_modules, resolve_preset, resolve_spec};
@@ -54,14 +54,12 @@ pub use spec_builder::{DynPipeline, SpecPipelineBuilder};
 pub use traits::{
     AlphaBoostWeighter, CandidateGraphBuilder, CandidateSelector, ChunkPhraseBuilder, Clusterer,
     CooccurrenceGraphBuilder, EdgeWeightPolicy, FocusTermsTeleportBuilder, GraphBuilder,
-    GraphTransform, IntraTopicEdgeRemover, JaccardHacClusterer, Linkage,
-    MultipartitePhraseBuilder, MultipartiteTransform, NoopClusterer, NoopGraphTransform,
-    NoopPreprocessor, PageRankRanker, PhraseBuilder, PhraseCandidateSelector,
-    PositionTeleportBuilder, Preprocessor, Ranker, ResultFormatter,
-    StandardResultFormatter,
-    TeleportBuilder, TopicGraphBuilder, TopicRepresentativeBuilder, TopicWeightsTeleportBuilder,
-    UniformTeleportBuilder, WindowGraphBuilder, WindowStrategy, WordNodeSelector,
-    DEFAULT_WINDOW_SIZE,
+    GraphTransform, IntraTopicEdgeRemover, JaccardHacClusterer, Linkage, MultipartitePhraseBuilder,
+    MultipartiteTransform, NoopClusterer, NoopGraphTransform, NoopPreprocessor, PageRankRanker,
+    PhraseBuilder, PhraseCandidateSelector, PositionTeleportBuilder, Preprocessor, Ranker,
+    ResultFormatter, StandardResultFormatter, TeleportBuilder, TopicGraphBuilder,
+    TopicRepresentativeBuilder, TopicWeightsTeleportBuilder, UniformTeleportBuilder,
+    WindowGraphBuilder, WindowStrategy, WordNodeSelector, DEFAULT_WINDOW_SIZE,
 };
 #[cfg(feature = "sentence-rank")]
 pub use traits::{

@@ -11,10 +11,10 @@
 //! difference from the base algorithm is the teleport (personalization)
 //! strategy.
 
+use crate::phrase::extraction::ExtractionResult;
 use crate::pipeline::artifacts::TokenStream;
 use crate::pipeline::observer::NoopObserver;
 use crate::pipeline::runner::BiasedTextRankPipeline;
-use crate::phrase::extraction::ExtractionResult;
 use crate::types::{Phrase, TextRankConfig, Token};
 
 /// BiasedTextRank implementation
@@ -71,8 +71,7 @@ impl BiasedTextRank {
 
     /// Extract keyphrases with PageRank convergence information
     pub fn extract_with_info(&self, tokens: &[Token]) -> ExtractionResult {
-        let pipeline =
-            BiasedTextRankPipeline::biased(self.focus_terms.clone(), self.bias_weight);
+        let pipeline = BiasedTextRankPipeline::biased(self.focus_terms.clone(), self.bias_weight);
         let stream = TokenStream::from_tokens(tokens);
         let mut obs = NoopObserver;
         let result = pipeline.run(stream, &self.config, &mut obs);
@@ -226,9 +225,6 @@ mod tests {
 
     #[test]
     fn test_biased_pipeline_constructs() {
-        let _pipeline = BiasedTextRankPipeline::biased(
-            vec!["machine".to_string()],
-            5.0,
-        );
+        let _pipeline = BiasedTextRankPipeline::biased(vec!["machine".to_string()], 5.0);
     }
 }

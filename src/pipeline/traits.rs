@@ -6,8 +6,8 @@
 
 use crate::pipeline::artifacts::{
     CandidateKind, CandidateSet, CandidateSetRef, ClusterAssignments, DebugPayload,
-    FormattedResult, Graph, PhraseCandidate, PhraseEntry, PhraseSet, RankOutput,
-    SentenceCandidate, TeleportType, TeleportVector, TokenStream, TokenStreamRef, WordCandidate,
+    FormattedResult, Graph, PhraseCandidate, PhraseEntry, PhraseSet, RankOutput, SentenceCandidate,
+    TeleportType, TeleportVector, TokenStream, TokenStreamRef, WordCandidate,
 };
 use crate::types::{ChunkSpan, PosTag, TextRankConfig};
 use serde::{Deserialize, Serialize};
@@ -100,8 +100,8 @@ pub struct WordNodeSelector;
 
 impl CandidateSelector for WordNodeSelector {
     fn select(&self, tokens: TokenStreamRef<'_>, cfg: &TextRankConfig) -> CandidateSet {
-        use rustc_hash::FxHashMap;
         use crate::types::PosTag;
+        use rustc_hash::FxHashMap;
 
         // Key: (lemma_id, optional POS discriminant) → index into `words`.
         let mut seen: FxHashMap<(u32, Option<PosTag>), usize> = FxHashMap::default();
@@ -1105,11 +1105,7 @@ impl GraphTransform for MultipartiteTransform {
 /// - **Deterministic**: same input → same output.
 pub trait Clusterer {
     /// Cluster phrase candidates into topic groups.
-    fn cluster(
-        &self,
-        candidates: CandidateSetRef<'_>,
-        cfg: &TextRankConfig,
-    ) -> ClusterAssignments;
+    fn cluster(&self, candidates: CandidateSetRef<'_>, cfg: &TextRankConfig) -> ClusterAssignments;
 }
 
 /// No-op clusterer — the default for word-level pipelines.
@@ -1577,22 +1573,18 @@ impl Ranker for PageRankRanker {
         let csr = graph.csr();
 
         let result = match teleport {
-            None => {
-                crate::pagerank::standard::StandardPageRank {
-                    damping: cfg.damping,
-                    max_iterations: cfg.max_iterations,
-                    threshold: cfg.convergence_threshold,
-                }
-                .run_reusing(csr, &mut ws.score_buf, &mut ws.norm_buf)
+            None => crate::pagerank::standard::StandardPageRank {
+                damping: cfg.damping,
+                max_iterations: cfg.max_iterations,
+                threshold: cfg.convergence_threshold,
             }
-            Some(tv) => {
-                crate::pagerank::personalized::PersonalizedPageRank::new()
-                    .with_damping(cfg.damping)
-                    .with_max_iterations(cfg.max_iterations)
-                    .with_threshold(cfg.convergence_threshold)
-                    .with_personalization(tv.as_slice().to_vec())
-                    .run_reusing(csr, &mut ws.score_buf, &mut ws.norm_buf)
-            }
+            .run_reusing(csr, &mut ws.score_buf, &mut ws.norm_buf),
+            Some(tv) => crate::pagerank::personalized::PersonalizedPageRank::new()
+                .with_damping(cfg.damping)
+                .with_max_iterations(cfg.max_iterations)
+                .with_threshold(cfg.convergence_threshold)
+                .with_personalization(tv.as_slice().to_vec())
+                .run_reusing(csr, &mut ws.score_buf, &mut ws.norm_buf),
         };
 
         RankOutput::from_pagerank_result(&result)
@@ -1694,8 +1686,11 @@ impl ResultFormatter for StandardResultFormatter {
         if cfg.determinism.is_deterministic() {
             formatted_phrases.sort_by(|a, b| a.stable_cmp(b));
         } else {
-            formatted_phrases
-                .sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
+            formatted_phrases.sort_by(|a, b| {
+                b.score
+                    .partial_cmp(&a.score)
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            });
         }
 
         // --- 3. Assign 1-indexed ranks after sorting ---
@@ -1703,11 +1698,7 @@ impl ResultFormatter for StandardResultFormatter {
             phrase.rank = i + 1;
         }
 
-        let result = FormattedResult::new(
-            formatted_phrases,
-            ranks.converged(),
-            ranks.iterations(),
-        );
+        let result = FormattedResult::new(formatted_phrases, ranks.converged(), ranks.iterations());
 
         match debug {
             Some(d) => result.with_debug(d),
@@ -1804,8 +1795,11 @@ impl ResultFormatter for SentenceFormatter {
         } else if cfg.determinism.is_deterministic() {
             formatted_phrases.sort_by(|a, b| a.stable_cmp(b));
         } else {
-            formatted_phrases
-                .sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
+            formatted_phrases.sort_by(|a, b| {
+                b.score
+                    .partial_cmp(&a.score)
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            });
         }
 
         // --- 3. Assign 1-indexed ranks after sorting ---
@@ -1813,11 +1807,7 @@ impl ResultFormatter for SentenceFormatter {
             phrase.rank = i + 1;
         }
 
-        let result = FormattedResult::new(
-            formatted_phrases,
-            ranks.converged(),
-            ranks.iterations(),
-        );
+        let result = FormattedResult::new(formatted_phrases, ranks.converged(), ranks.iterations());
 
         match debug {
             Some(d) => result.with_debug(d),
@@ -2172,7 +2162,9 @@ pub struct SentenceGraphBuilder {
 #[cfg(feature = "sentence-rank")]
 impl Default for SentenceGraphBuilder {
     fn default() -> Self {
-        Self { min_similarity: 0.0 }
+        Self {
+            min_similarity: 0.0,
+        }
     }
 }
 
@@ -2373,8 +2365,16 @@ impl PhraseBuilder for TopicRepresentativeBuilder {
                 .unwrap_or(std::cmp::Ordering::Equal)
                 // Tie-breaker 1: earlier position first.
                 .then_with(|| {
-                    let a_pos = a.spans.as_ref().and_then(|s: &Vec<(u32, u32)>| s.first().map(|p| p.0)).unwrap_or(u32::MAX);
-                    let b_pos = b.spans.as_ref().and_then(|s: &Vec<(u32, u32)>| s.first().map(|p| p.0)).unwrap_or(u32::MAX);
+                    let a_pos = a
+                        .spans
+                        .as_ref()
+                        .and_then(|s: &Vec<(u32, u32)>| s.first().map(|p| p.0))
+                        .unwrap_or(u32::MAX);
+                    let b_pos = b
+                        .spans
+                        .as_ref()
+                        .and_then(|s: &Vec<(u32, u32)>| s.first().map(|p| p.0))
+                        .unwrap_or(u32::MAX);
                     a_pos.cmp(&b_pos)
                 })
                 // Tie-breaker 2: lemma text ascending.
@@ -2480,8 +2480,16 @@ impl PhraseBuilder for MultipartitePhraseBuilder {
                 .partial_cmp(&a.score)
                 .unwrap_or(std::cmp::Ordering::Equal)
                 .then_with(|| {
-                    let a_pos = a.spans.as_ref().and_then(|s| s.first().map(|p| p.0)).unwrap_or(u32::MAX);
-                    let b_pos = b.spans.as_ref().and_then(|s| s.first().map(|p| p.0)).unwrap_or(u32::MAX);
+                    let a_pos = a
+                        .spans
+                        .as_ref()
+                        .and_then(|s| s.first().map(|p| p.0))
+                        .unwrap_or(u32::MAX);
+                    let b_pos = b
+                        .spans
+                        .as_ref()
+                        .and_then(|s| s.first().map(|p| p.0))
+                        .unwrap_or(u32::MAX);
                     a_pos.cmp(&b_pos)
                 })
                 .then_with(|| {
@@ -2569,8 +2577,16 @@ impl PhraseBuilder for SentencePhraseBuilder {
                 .partial_cmp(&a.score)
                 .unwrap_or(std::cmp::Ordering::Equal)
                 .then_with(|| {
-                    let a_pos = a.spans.as_ref().and_then(|s| s.first().map(|p| p.0)).unwrap_or(u32::MAX);
-                    let b_pos = b.spans.as_ref().and_then(|s| s.first().map(|p| p.0)).unwrap_or(u32::MAX);
+                    let a_pos = a
+                        .spans
+                        .as_ref()
+                        .and_then(|s| s.first().map(|p| p.0))
+                        .unwrap_or(u32::MAX);
+                    let b_pos = b
+                        .spans
+                        .as_ref()
+                        .and_then(|s| s.first().map(|p| p.0))
+                        .unwrap_or(u32::MAX);
                     a_pos.cmp(&b_pos)
                 })
         });
@@ -2628,11 +2644,7 @@ impl GraphTransform for Box<dyn GraphTransform> {
 }
 
 impl Clusterer for Box<dyn Clusterer> {
-    fn cluster(
-        &self,
-        candidates: CandidateSetRef<'_>,
-        cfg: &TextRankConfig,
-    ) -> ClusterAssignments {
+    fn cluster(&self, candidates: CandidateSetRef<'_>, cfg: &TextRankConfig) -> ClusterAssignments {
         (**self).cluster(candidates, cfg)
     }
 }
@@ -2727,11 +2739,7 @@ impl GraphTransform for Box<dyn GraphTransform + Send + Sync> {
 }
 
 impl Clusterer for Box<dyn Clusterer + Send + Sync> {
-    fn cluster(
-        &self,
-        candidates: CandidateSetRef<'_>,
-        cfg: &TextRankConfig,
-    ) -> ClusterAssignments {
+    fn cluster(&self, candidates: CandidateSetRef<'_>, cfg: &TextRankConfig) -> ClusterAssignments {
         (**self).cluster(candidates, cfg)
     }
 }
@@ -2906,9 +2914,7 @@ mod tests {
             }
         }
 
-        let tokens = vec![
-            Token::new("Machine", "Machine", PosTag::Noun, 0, 7, 0, 0),
-        ];
+        let tokens = vec![Token::new("Machine", "Machine", PosTag::Noun, 0, 7, 0, 0)];
         let mut stream = TokenStream::from_tokens(&tokens);
         let cfg = TextRankConfig::default();
 
@@ -3003,9 +3009,10 @@ mod tests {
         let cs = WordNodeSelector.select(stream.as_ref(), &cfg);
         let words = cs.words();
 
-        let great = words.iter().find(|w| {
-            stream.pool().get(w.lemma_id) == Some("great")
-        }).unwrap();
+        let great = words
+            .iter()
+            .find(|w| stream.pool().get(w.lemma_id) == Some("great"))
+            .unwrap();
         assert_eq!(great.first_position, 0); // First occurrence, not 2.
     }
 
@@ -3015,7 +3022,12 @@ mod tests {
         let stream = TokenStream::from_tokens(&tokens);
         let mut cfg = TextRankConfig::default();
         // Include Verb so we can check stopword "is" is still excluded.
-        cfg.include_pos = vec![PosTag::Noun, PosTag::Verb, PosTag::Adjective, PosTag::ProperNoun];
+        cfg.include_pos = vec![
+            PosTag::Noun,
+            PosTag::Verb,
+            PosTag::Adjective,
+            PosTag::ProperNoun,
+        ];
 
         let cs = WordNodeSelector.select(stream.as_ref(), &cfg);
         let words = cs.words();
@@ -3061,11 +3073,8 @@ mod tests {
         let cfg = TextRankConfig::default();
 
         let from_selector = WordNodeSelector.select(stream.as_ref(), &cfg);
-        let from_bridge = CandidateSet::from_word_tokens(
-            &stream,
-            &cfg.include_pos,
-            cfg.use_pos_in_nodes,
-        );
+        let from_bridge =
+            CandidateSet::from_word_tokens(&stream, &cfg.include_pos, cfg.use_pos_in_nodes);
 
         assert_eq!(from_selector.len(), from_bridge.len());
         let sel_words = from_selector.words();
@@ -3126,8 +3135,20 @@ mod tests {
         let cfg = TextRankConfig::default();
 
         let chunks = vec![
-            ChunkSpan { start_token: 0, end_token: 2, start_char: 0, end_char: 16, sentence_idx: 0 },
-            ChunkSpan { start_token: 3, end_token: 5, start_char: 20, end_char: 33, sentence_idx: 0 },
+            ChunkSpan {
+                start_token: 0,
+                end_token: 2,
+                start_char: 0,
+                end_char: 16,
+                sentence_idx: 0,
+            },
+            ChunkSpan {
+                start_token: 3,
+                end_token: 5,
+                start_char: 20,
+                end_char: 33,
+                sentence_idx: 0,
+            },
         ];
 
         let cs = PhraseCandidateSelector::new(chunks).select(stream.as_ref(), &cfg);
@@ -3150,14 +3171,18 @@ mod tests {
         let cfg = TextRankConfig::default();
 
         let chunks = vec![ChunkSpan {
-            start_token: 0, end_token: 3, start_char: 0, end_char: 11, sentence_idx: 0,
+            start_token: 0,
+            end_token: 3,
+            start_char: 0,
+            end_char: 11,
+            sentence_idx: 0,
         }];
 
         let cs = PhraseCandidateSelector::new(chunks).select(stream.as_ref(), &cfg);
         let p = &cs.phrases()[0];
 
         assert_eq!(p.lemma_ids.len(), 3); // All tokens in lemma_ids.
-        assert_eq!(p.term_ids.len(), 2);  // Only non-stopword in term_ids.
+        assert_eq!(p.term_ids.len(), 2); // Only non-stopword in term_ids.
     }
 
     #[test]
@@ -3177,7 +3202,11 @@ mod tests {
 
         // Chunks reference tokens that don't exist → skipped.
         let chunks = vec![ChunkSpan {
-            start_token: 0, end_token: 2, start_char: 0, end_char: 10, sentence_idx: 0,
+            start_token: 0,
+            end_token: 2,
+            start_char: 0,
+            end_char: 10,
+            sentence_idx: 0,
         }];
         let cs = PhraseCandidateSelector::new(chunks).select(stream.as_ref(), &cfg);
         assert!(cs.is_empty());
@@ -3185,19 +3214,35 @@ mod tests {
 
     #[test]
     fn test_phrase_selector_invalid_chunk_skipped() {
-        let tokens = vec![
-            Token::new("hello", "hello", PosTag::Noun, 0, 5, 0, 0),
-        ];
+        let tokens = vec![Token::new("hello", "hello", PosTag::Noun, 0, 5, 0, 0)];
         let stream = TokenStream::from_tokens(&tokens);
         let cfg = TextRankConfig::default();
 
         let chunks = vec![
             // Valid chunk.
-            ChunkSpan { start_token: 0, end_token: 1, start_char: 0, end_char: 5, sentence_idx: 0 },
+            ChunkSpan {
+                start_token: 0,
+                end_token: 1,
+                start_char: 0,
+                end_char: 5,
+                sentence_idx: 0,
+            },
             // Invalid: end > stream length.
-            ChunkSpan { start_token: 0, end_token: 99, start_char: 0, end_char: 100, sentence_idx: 0 },
+            ChunkSpan {
+                start_token: 0,
+                end_token: 99,
+                start_char: 0,
+                end_char: 100,
+                sentence_idx: 0,
+            },
             // Invalid: start >= end.
-            ChunkSpan { start_token: 5, end_token: 3, start_char: 0, end_char: 0, sentence_idx: 0 },
+            ChunkSpan {
+                start_token: 5,
+                end_token: 3,
+                start_char: 0,
+                end_char: 0,
+                sentence_idx: 0,
+            },
         ];
 
         let cs = PhraseCandidateSelector::new(chunks).select(stream.as_ref(), &cfg);
@@ -3230,7 +3275,11 @@ mod tests {
         let cfg = TextRankConfig::default();
 
         let chunks = vec![ChunkSpan {
-            start_token: 0, end_token: 2, start_char: 0, end_char: 7, sentence_idx: 0,
+            start_token: 0,
+            end_token: 2,
+            start_char: 0,
+            end_char: 7,
+            sentence_idx: 0,
         }];
         let selector: Box<dyn CandidateSelector> = Box::new(PhraseCandidateSelector::new(chunks));
 
@@ -4122,10 +4171,7 @@ mod tests {
                 csr.weights, ref_weights,
                 "CSR weights differ on iteration {i}"
             );
-            assert_eq!(
-                csr.lemmas, ref_lemmas,
-                "CSR lemmas differ on iteration {i}"
-            );
+            assert_eq!(csr.lemmas, ref_lemmas, "CSR lemmas differ on iteration {i}");
         }
     }
 
@@ -4205,19 +4251,31 @@ mod tests {
         // Single linkage chains everything; complete does not.
         let phrases = vec![
             PhraseCandidate {
-                start_token: 0, end_token: 1, start_char: 0, end_char: 5,
-                sentence_idx: 0, lemma_ids: vec![0, 1, 2],
-                term_ids: vec![10, 11, 12],           // A
+                start_token: 0,
+                end_token: 1,
+                start_char: 0,
+                end_char: 5,
+                sentence_idx: 0,
+                lemma_ids: vec![0, 1, 2],
+                term_ids: vec![10, 11, 12], // A
             },
             PhraseCandidate {
-                start_token: 2, end_token: 3, start_char: 6, end_char: 10,
-                sentence_idx: 0, lemma_ids: vec![1, 2, 3],
-                term_ids: vec![11, 12, 13],           // B — overlaps A
+                start_token: 2,
+                end_token: 3,
+                start_char: 6,
+                end_char: 10,
+                sentence_idx: 0,
+                lemma_ids: vec![1, 2, 3],
+                term_ids: vec![11, 12, 13], // B — overlaps A
             },
             PhraseCandidate {
-                start_token: 4, end_token: 5, start_char: 11, end_char: 15,
-                sentence_idx: 0, lemma_ids: vec![3, 4, 5],
-                term_ids: vec![13, 14, 15],           // C — overlaps B but not A
+                start_token: 4,
+                end_token: 5,
+                start_char: 11,
+                end_char: 15,
+                sentence_idx: 0,
+                lemma_ids: vec![3, 4, 5],
+                term_ids: vec![13, 14, 15], // C — overlaps B but not A
             },
         ];
         let cfg = TextRankConfig::default();
@@ -4320,16 +4378,31 @@ mod tests {
         // Three candidates with completely disjoint term sets.
         let phrases = vec![
             PhraseCandidate {
-                start_token: 0, end_token: 1, start_char: 0, end_char: 5,
-                sentence_idx: 0, lemma_ids: vec![0], term_ids: vec![10],
+                start_token: 0,
+                end_token: 1,
+                start_char: 0,
+                end_char: 5,
+                sentence_idx: 0,
+                lemma_ids: vec![0],
+                term_ids: vec![10],
             },
             PhraseCandidate {
-                start_token: 2, end_token: 3, start_char: 6, end_char: 10,
-                sentence_idx: 0, lemma_ids: vec![1], term_ids: vec![20],
+                start_token: 2,
+                end_token: 3,
+                start_char: 6,
+                end_char: 10,
+                sentence_idx: 0,
+                lemma_ids: vec![1],
+                term_ids: vec![20],
             },
             PhraseCandidate {
-                start_token: 4, end_token: 5, start_char: 11, end_char: 15,
-                sentence_idx: 0, lemma_ids: vec![2], term_ids: vec![30],
+                start_token: 4,
+                end_token: 5,
+                start_char: 11,
+                end_char: 15,
+                sentence_idx: 0,
+                lemma_ids: vec![2],
+                term_ids: vec![30],
             },
         ];
 
@@ -4376,12 +4449,7 @@ mod tests {
         let edges_before = graph.num_edges();
         assert!(!graph.is_transformed());
 
-        NoopGraphTransform.transform(
-            &mut graph,
-            stream.as_ref(),
-            cs.as_ref(),
-            &cfg,
-        );
+        NoopGraphTransform.transform(&mut graph, stream.as_ref(), cs.as_ref(), &cfg);
 
         assert_eq!(graph.num_nodes(), nodes_before);
         assert_eq!(graph.num_edges(), edges_before);
@@ -4457,12 +4525,7 @@ mod tests {
         let mut graph = gb.build(stream.as_ref(), cs.as_ref(), &cfg);
         assert!(!graph.is_transformed());
 
-        RemoveFirstNodeEdges.transform(
-            &mut graph,
-            stream.as_ref(),
-            cs.as_ref(),
-            &cfg,
-        );
+        RemoveFirstNodeEdges.transform(&mut graph, stream.as_ref(), cs.as_ref(), &cfg);
 
         // csr_mut() should have flipped the transformed flag.
         assert!(graph.is_transformed());
@@ -4530,10 +4593,8 @@ mod tests {
         };
         let mut graph_a = gb.build(stream.as_ref(), cs.as_ref(), &cfg);
 
-        let transforms_a: Vec<Box<dyn GraphTransform>> = vec![
-            Box::new(DoubleWeights),
-            Box::new(AddOneToWeights),
-        ];
+        let transforms_a: Vec<Box<dyn GraphTransform>> =
+            vec![Box::new(DoubleWeights), Box::new(AddOneToWeights)];
         for t in &transforms_a {
             t.transform(&mut graph_a, stream.as_ref(), cs.as_ref(), &cfg);
         }
@@ -4547,10 +4608,8 @@ mod tests {
         // Order B: add1 then double → (1.0 + 1) * 2 = 4.0
         let mut graph_b = gb.build(stream.as_ref(), cs.as_ref(), &cfg);
 
-        let transforms_b: Vec<Box<dyn GraphTransform>> = vec![
-            Box::new(AddOneToWeights),
-            Box::new(DoubleWeights),
-        ];
+        let transforms_b: Vec<Box<dyn GraphTransform>> =
+            vec![Box::new(AddOneToWeights), Box::new(DoubleWeights)];
         for t in &transforms_b {
             t.transform(&mut graph_b, stream.as_ref(), cs.as_ref(), &cfg);
         }
@@ -4632,8 +4691,7 @@ mod tests {
         let cs = word_candidates(&stream, &cfg);
 
         // Cluster: {0, 1} in cluster 0, {2, 3} in cluster 1.
-        let assignments =
-            ClusterAssignments::from_cluster_vecs(&[vec![0, 1], vec![2, 3]], 4);
+        let assignments = ClusterAssignments::from_cluster_vecs(&[vec![0, 1], vec![2, 3]], 4);
         let remover = IntraTopicEdgeRemover::new(assignments);
 
         remover.transform(&mut graph, stream.as_ref(), cs.as_ref(), &cfg);
@@ -4690,13 +4748,16 @@ mod tests {
         assert!((graph.csr().total_weight[0] - 2.0).abs() < 1e-10);
 
         // Cluster: {0, 1} in cluster 0, {2} in cluster 1, {3} in cluster 2.
-        let assignments =
-            ClusterAssignments::from_cluster_vecs(&[vec![0, 1], vec![2], vec![3]], 4);
+        let assignments = ClusterAssignments::from_cluster_vecs(&[vec![0, 1], vec![2], vec![3]], 4);
         let remover = IntraTopicEdgeRemover::new(assignments);
         remover.transform(&mut graph, stream.as_ref(), cs.as_ref(), &cfg);
 
         // Node 0: edge to 1 zeroed (same cluster), edge to 2 kept.
-        assert_eq!(graph.csr().out_degree[0], 1, "Node 0 should have degree 1 after removal");
+        assert_eq!(
+            graph.csr().out_degree[0],
+            1,
+            "Node 0 should have degree 1 after removal"
+        );
         assert!(
             (graph.csr().total_weight[0] - 1.0).abs() < 1e-10,
             "Node 0 total_weight should be 1.0"
@@ -4715,15 +4776,15 @@ mod tests {
         let stream = TokenStream::from_tokens(&tokens);
         let cs = word_candidates(&stream, &cfg);
 
-        let assignments =
-            ClusterAssignments::from_cluster_vecs(&[vec![0, 1, 2, 3]], 4);
+        let assignments = ClusterAssignments::from_cluster_vecs(&[vec![0, 1, 2, 3]], 4);
         let remover = IntraTopicEdgeRemover::new(assignments);
         remover.transform(&mut graph, stream.as_ref(), cs.as_ref(), &cfg);
 
         // All edges should be zeroed.
         for node in 0..4u32 {
             assert_eq!(
-                graph.csr().out_degree[node as usize], 0,
+                graph.csr().out_degree[node as usize],
+                0,
                 "Node {node} should have degree 0 (all same cluster)"
             );
             assert!(
@@ -4749,10 +4810,8 @@ mod tests {
         let orig_weights: Vec<f64> = graph.csr().weights.clone();
         let orig_degrees: Vec<u32> = graph.csr().out_degree.clone();
 
-        let assignments = ClusterAssignments::from_cluster_vecs(
-            &[vec![0], vec![1], vec![2], vec![3]],
-            4,
-        );
+        let assignments =
+            ClusterAssignments::from_cluster_vecs(&[vec![0], vec![1], vec![2], vec![3]], 4);
         let remover = IntraTopicEdgeRemover::new(assignments);
         remover.transform(&mut graph, stream.as_ref(), cs.as_ref(), &cfg);
 
@@ -4780,8 +4839,7 @@ mod tests {
 
     #[test]
     fn test_intra_topic_edge_remover_trait_object() {
-        let assignments =
-            ClusterAssignments::from_cluster_vecs(&[vec![0, 1], vec![2, 3]], 4);
+        let assignments = ClusterAssignments::from_cluster_vecs(&[vec![0, 1], vec![2, 3]], 4);
         let transform: Box<dyn GraphTransform> = Box::new(IntraTopicEdgeRemover::new(assignments));
 
         let mut graph = build_test_graph_4nodes();
@@ -4799,8 +4857,7 @@ mod tests {
 
     #[test]
     fn test_intra_topic_edge_remover_accessor() {
-        let assignments =
-            ClusterAssignments::from_cluster_vecs(&[vec![0], vec![1]], 2);
+        let assignments = ClusterAssignments::from_cluster_vecs(&[vec![0], vec![1]], 2);
         let remover = IntraTopicEdgeRemover::new(assignments);
         assert_eq!(remover.assignments().num_clusters(), 2);
         assert_eq!(remover.assignments().num_candidates(), 2);
@@ -4823,20 +4880,40 @@ mod tests {
     fn phrase_candidates_4() -> CandidateSet {
         let phrases = vec![
             PhraseCandidate {
-                start_token: 0, end_token: 2, start_char: 0, end_char: 10,
-                sentence_idx: 0, lemma_ids: vec![0], term_ids: vec![10],
+                start_token: 0,
+                end_token: 2,
+                start_char: 0,
+                end_char: 10,
+                sentence_idx: 0,
+                lemma_ids: vec![0],
+                term_ids: vec![10],
             },
             PhraseCandidate {
-                start_token: 3, end_token: 5, start_char: 11, end_char: 20,
-                sentence_idx: 0, lemma_ids: vec![1], term_ids: vec![20],
+                start_token: 3,
+                end_token: 5,
+                start_char: 11,
+                end_char: 20,
+                sentence_idx: 0,
+                lemma_ids: vec![1],
+                term_ids: vec![20],
             },
             PhraseCandidate {
-                start_token: 6, end_token: 8, start_char: 21, end_char: 30,
-                sentence_idx: 1, lemma_ids: vec![2], term_ids: vec![30],
+                start_token: 6,
+                end_token: 8,
+                start_char: 21,
+                end_char: 30,
+                sentence_idx: 1,
+                lemma_ids: vec![2],
+                term_ids: vec![30],
             },
             PhraseCandidate {
-                start_token: 9, end_token: 11, start_char: 31, end_char: 40,
-                sentence_idx: 1, lemma_ids: vec![3], term_ids: vec![40],
+                start_token: 9,
+                end_token: 11,
+                start_char: 31,
+                end_char: 40,
+                sentence_idx: 1,
+                lemma_ids: vec![3],
+                term_ids: vec![40],
             },
         ];
         CandidateSet::from_kind(CandidateKind::Phrases(phrases))
@@ -4853,8 +4930,7 @@ mod tests {
         let stream = TokenStream::from_tokens(&tokens);
         let cs = phrase_candidates_4();
 
-        let assignments =
-            ClusterAssignments::from_cluster_vecs(&[vec![0, 1], vec![2], vec![3]], 4);
+        let assignments = ClusterAssignments::from_cluster_vecs(&[vec![0, 1], vec![2], vec![3]], 4);
         let booster = AlphaBoostWeighter::new(assignments);
 
         // Before: edge 2→0 has weight 1.0
@@ -4869,31 +4945,29 @@ mod tests {
         assert!(
             w_after > w_before,
             "Edge 2→0 should be boosted: before={}, after={}",
-            w_before, w_after,
+            w_before,
+            w_after,
         );
         assert!(graph.is_transformed());
     }
 
     #[test]
     fn test_alpha_boost_weighter_default_alpha() {
-        let assignments =
-            ClusterAssignments::from_cluster_vecs(&[vec![0], vec![1]], 2);
+        let assignments = ClusterAssignments::from_cluster_vecs(&[vec![0], vec![1]], 2);
         let booster = AlphaBoostWeighter::new(assignments);
         assert!((booster.alpha - 1.1).abs() < 1e-10);
     }
 
     #[test]
     fn test_alpha_boost_weighter_custom_alpha() {
-        let assignments =
-            ClusterAssignments::from_cluster_vecs(&[vec![0], vec![1]], 2);
+        let assignments = ClusterAssignments::from_cluster_vecs(&[vec![0], vec![1]], 2);
         let booster = AlphaBoostWeighter::with_alpha(assignments, 2.5);
         assert!((booster.alpha - 2.5).abs() < 1e-10);
     }
 
     #[test]
     fn test_alpha_boost_weighter_accessor() {
-        let assignments =
-            ClusterAssignments::from_cluster_vecs(&[vec![0], vec![1, 2]], 3);
+        let assignments = ClusterAssignments::from_cluster_vecs(&[vec![0], vec![1, 2]], 3);
         let booster = AlphaBoostWeighter::new(assignments);
         assert_eq!(booster.assignments().num_clusters(), 2);
         assert_eq!(booster.assignments().num_candidates(), 3);
@@ -4909,13 +4983,11 @@ mod tests {
         let cs = phrase_candidates_4();
 
         // Snapshot weights before.
-        let weights_before: Vec<Vec<(u32, f64)>> = (0..4)
-            .map(|n| graph.neighbors(n).collect())
-            .collect();
+        let weights_before: Vec<Vec<(u32, f64)>> =
+            (0..4).map(|n| graph.neighbors(n).collect()).collect();
 
-        let assignments = ClusterAssignments::from_cluster_vecs(
-            &[vec![0], vec![1], vec![2], vec![3]], 4,
-        );
+        let assignments =
+            ClusterAssignments::from_cluster_vecs(&[vec![0], vec![1], vec![2], vec![3]], 4);
         let booster = AlphaBoostWeighter::new(assignments);
         booster.transform(&mut graph, stream.as_ref(), cs.as_ref(), &cfg);
 
@@ -4924,7 +4996,8 @@ mod tests {
             let weights_after: Vec<(u32, f64)> = graph.neighbors(node).collect();
             assert_eq!(
                 weights_before[node as usize], weights_after,
-                "Node {} weights should be unchanged with single-member clusters", node,
+                "Node {} weights should be unchanged with single-member clusters",
+                node,
             );
         }
     }
@@ -4946,10 +5019,8 @@ mod tests {
 
     #[test]
     fn test_alpha_boost_weighter_trait_object() {
-        let assignments =
-            ClusterAssignments::from_cluster_vecs(&[vec![0, 1], vec![2, 3]], 4);
-        let transform: Box<dyn GraphTransform> =
-            Box::new(AlphaBoostWeighter::new(assignments));
+        let assignments = ClusterAssignments::from_cluster_vecs(&[vec![0, 1], vec![2, 3]], 4);
+        let transform: Box<dyn GraphTransform> = Box::new(AlphaBoostWeighter::new(assignments));
 
         let mut graph = build_test_graph_4nodes();
         let cfg = TextRankConfig::default();
@@ -4970,28 +5041,33 @@ mod tests {
         let stream = TokenStream::from_tokens(&tokens);
         let cs = phrase_candidates_4();
 
-        let assignments =
-            ClusterAssignments::from_cluster_vecs(&[vec![0, 1], vec![2], vec![3]], 4);
+        let assignments = ClusterAssignments::from_cluster_vecs(&[vec![0, 1], vec![2], vec![3]], 4);
         let booster = AlphaBoostWeighter::new(assignments);
         booster.transform(&mut graph, stream.as_ref(), cs.as_ref(), &cfg);
 
         // Verify total_weight is consistent with actual edge weights for every node.
         for node in 0..4 {
-            let actual_total: f64 = graph.neighbors(node as u32)
+            let actual_total: f64 = graph
+                .neighbors(node as u32)
                 .filter(|&(_, w)| w > 0.0)
                 .map(|(_, w)| w)
                 .sum();
-            let actual_degree: u32 = graph.neighbors(node as u32)
+            let actual_degree: u32 = graph
+                .neighbors(node as u32)
                 .filter(|&(_, w)| w > 0.0)
                 .count() as u32;
             assert!(
                 (graph.csr().total_weight[node] - actual_total).abs() < 1e-10,
                 "Node {} total_weight mismatch: stored={}, actual={}",
-                node, graph.csr().total_weight[node], actual_total,
+                node,
+                graph.csr().total_weight[node],
+                actual_total,
             );
             assert_eq!(
-                graph.csr().out_degree[node], actual_degree,
-                "Node {} out_degree mismatch", node,
+                graph.csr().out_degree[node],
+                actual_degree,
+                "Node {} out_degree mismatch",
+                node,
             );
         }
     }
@@ -5009,12 +5085,20 @@ mod tests {
             ClusterAssignments::from_cluster_vecs(&[vec![0, 1], vec![2], vec![3]], 4);
 
         let mut graph1 = build_test_graph_4nodes();
-        AlphaBoostWeighter::with_alpha(assignments1, 1.0)
-            .transform(&mut graph1, stream.as_ref(), cs.as_ref(), &cfg);
+        AlphaBoostWeighter::with_alpha(assignments1, 1.0).transform(
+            &mut graph1,
+            stream.as_ref(),
+            cs.as_ref(),
+            &cfg,
+        );
 
         let mut graph2 = build_test_graph_4nodes();
-        AlphaBoostWeighter::with_alpha(assignments2, 3.0)
-            .transform(&mut graph2, stream.as_ref(), cs.as_ref(), &cfg);
+        AlphaBoostWeighter::with_alpha(assignments2, 3.0).transform(
+            &mut graph2,
+            stream.as_ref(),
+            cs.as_ref(),
+            &cfg,
+        );
 
         // Edge 2→0 should be more boosted with alpha=3.0 than alpha=1.0.
         let w1: f64 = graph1.neighbors(2).find(|&(n, _)| n == 0).unwrap().1;
@@ -5022,7 +5106,8 @@ mod tests {
         assert!(
             w2 > w1,
             "Higher alpha should produce larger boost: alpha=1.0 → {}, alpha=3.0 → {}",
-            w1, w2,
+            w1,
+            w2,
         );
     }
 
@@ -5101,7 +5186,11 @@ mod tests {
             .unwrap();
 
         // The candidate with first_position == 0 should have the highest weight.
-        let max_val = tv.as_slice().iter().cloned().fold(f64::NEG_INFINITY, f64::max);
+        let max_val = tv
+            .as_slice()
+            .iter()
+            .cloned()
+            .fold(f64::NEG_INFINITY, f64::max);
         let first_candidate_pos = cs.words().iter().position(|w| w.first_position == 0);
         if let Some(idx) = first_candidate_pos {
             assert!(
@@ -5130,7 +5219,11 @@ mod tests {
         let stream = TokenStream::from_tokens(&tokens);
         let cfg = TextRankConfig::default();
         let chunks = vec![ChunkSpan {
-            start_token: 0, end_token: 2, start_char: 0, end_char: 7, sentence_idx: 0,
+            start_token: 0,
+            end_token: 2,
+            start_char: 0,
+            end_char: 7,
+            sentence_idx: 0,
         }];
         let cs = PhraseCandidateSelector::new(chunks).select(stream.as_ref(), &cfg);
 
@@ -5204,7 +5297,11 @@ mod tests {
 
         // Earlier positions should have higher weight.
         // First candidate (position 0) should have highest weight.
-        let max_val = tv.as_slice().iter().cloned().fold(f64::NEG_INFINITY, f64::max);
+        let max_val = tv
+            .as_slice()
+            .iter()
+            .cloned()
+            .fold(f64::NEG_INFINITY, f64::max);
         assert!((tv[0] - max_val).abs() < 1e-10);
     }
 
@@ -5250,7 +5347,9 @@ mod tests {
         let cs = word_candidates(&stream, &cfg);
 
         // Find lemma_id for "machine".
-        let machine_lemma_id = cs.words().iter()
+        let machine_lemma_id = cs
+            .words()
+            .iter()
             .find(|w| stream.pool().get(w.lemma_id) == Some("machine"))
             .map(|w| w.lemma_id)
             .unwrap();
@@ -5267,10 +5366,14 @@ mod tests {
         assert!(tv.is_normalized(1e-10));
 
         // The focused term should have higher probability than non-focused.
-        let machine_idx = cs.words().iter()
+        let machine_idx = cs
+            .words()
+            .iter()
             .position(|w| w.lemma_id == machine_lemma_id)
             .unwrap();
-        let non_focus_idx = cs.words().iter()
+        let non_focus_idx = cs
+            .words()
+            .iter()
             .position(|w| w.lemma_id != machine_lemma_id)
             .unwrap();
         assert!(
@@ -5332,7 +5435,11 @@ mod tests {
         let cfg = TextRankConfig::default();
 
         let chunks = vec![ChunkSpan {
-            start_token: 0, end_token: 2, start_char: 0, end_char: 7, sentence_idx: 0,
+            start_token: 0,
+            end_token: 2,
+            start_char: 0,
+            end_char: 7,
+            sentence_idx: 0,
         }];
         let cs = PhraseCandidateSelector::new(chunks).select(stream.as_ref(), &cfg);
 
@@ -5347,9 +5454,7 @@ mod tests {
     #[test]
     fn test_position_teleport_single_candidate() {
         // A single candidate should produce a vector of [1.0].
-        let tokens = vec![
-            Token::new("Rust", "rust", PosTag::Noun, 0, 4, 0, 0),
-        ];
+        let tokens = vec![Token::new("Rust", "rust", PosTag::Noun, 0, 4, 0, 0)];
         let stream = TokenStream::from_tokens(&tokens);
         let cfg = TextRankConfig::default();
         let cs = word_candidates(&stream, &cfg);
@@ -5432,10 +5537,7 @@ mod tests {
         let cfg = TextRankConfig::default();
         let cs = word_candidates(&stream, &cfg);
 
-        let builder = FocusTermsTeleportBuilder::new(
-            vec!["machine".to_string()],
-            10.0,
-        );
+        let builder = FocusTermsTeleportBuilder::new(vec!["machine".to_string()], 10.0);
 
         let result = builder.build(stream.as_ref(), cs.as_ref(), &cfg);
         assert!(result.is_some());
@@ -5453,18 +5555,19 @@ mod tests {
         let cfg = TextRankConfig::default();
         let cs = word_candidates(&stream, &cfg);
 
-        let builder = FocusTermsTeleportBuilder::new(
-            vec!["machine".to_string()],
-            10.0,
-        );
+        let builder = FocusTermsTeleportBuilder::new(vec!["machine".to_string()], 10.0);
         let tv = builder.build(stream.as_ref(), cs.as_ref(), &cfg).unwrap();
 
         // Find the index of "machine" among candidates.
-        let machine_idx = cs.words().iter()
+        let machine_idx = cs
+            .words()
+            .iter()
             .position(|w| stream.pool().get(w.lemma_id) == Some("machine"))
             .unwrap();
         // Find any non-focus candidate index.
-        let other_idx = cs.words().iter()
+        let other_idx = cs
+            .words()
+            .iter()
             .position(|w| stream.pool().get(w.lemma_id) != Some("machine"))
             .unwrap();
 
@@ -5481,19 +5584,21 @@ mod tests {
         let cfg = TextRankConfig::default();
         let cs = word_candidates(&stream, &cfg);
 
-        let builder = FocusTermsTeleportBuilder::new(
-            vec!["machine".to_string(), "rust".to_string()],
-            5.0,
-        );
+        let builder =
+            FocusTermsTeleportBuilder::new(vec!["machine".to_string(), "rust".to_string()], 5.0);
         let tv = builder.build(stream.as_ref(), cs.as_ref(), &cfg).unwrap();
 
         assert!(tv.is_normalized(1e-10));
 
         // Both focus terms should have the same probability (same bias weight).
-        let machine_idx = cs.words().iter()
+        let machine_idx = cs
+            .words()
+            .iter()
             .position(|w| stream.pool().get(w.lemma_id) == Some("machine"))
             .unwrap();
-        let rust_idx = cs.words().iter()
+        let rust_idx = cs
+            .words()
+            .iter()
             .position(|w| stream.pool().get(w.lemma_id) == Some("rust"))
             .unwrap();
 
@@ -5509,10 +5614,7 @@ mod tests {
         let cfg = TextRankConfig::default();
         let cs = word_candidates(&stream, &cfg);
 
-        let builder = FocusTermsTeleportBuilder::new(
-            vec!["machine".to_string()],
-            10.0,
-        );
+        let builder = FocusTermsTeleportBuilder::new(vec!["machine".to_string()], 10.0);
         let result = builder.build(stream.as_ref(), cs.as_ref(), &cfg);
         assert!(result.is_none());
     }
@@ -5527,14 +5629,15 @@ mod tests {
         let cfg = TextRankConfig::default();
 
         let chunks = vec![ChunkSpan {
-            start_token: 0, end_token: 2, start_char: 0, end_char: 7, sentence_idx: 0,
+            start_token: 0,
+            end_token: 2,
+            start_char: 0,
+            end_char: 7,
+            sentence_idx: 0,
         }];
         let cs = PhraseCandidateSelector::new(chunks).select(stream.as_ref(), &cfg);
 
-        let builder = FocusTermsTeleportBuilder::new(
-            vec!["big".to_string()],
-            10.0,
-        );
+        let builder = FocusTermsTeleportBuilder::new(vec!["big".to_string()], 10.0);
         let result = builder.build(stream.as_ref(), cs.as_ref(), &cfg);
         assert!(result.is_none());
     }
@@ -5547,10 +5650,7 @@ mod tests {
         let cs = word_candidates(&stream, &cfg);
 
         // Focus on terms not present in the document.
-        let builder = FocusTermsTeleportBuilder::new(
-            vec!["nonexistent".to_string()],
-            10.0,
-        );
+        let builder = FocusTermsTeleportBuilder::new(vec!["nonexistent".to_string()], 10.0);
         let tv = builder.build(stream.as_ref(), cs.as_ref(), &cfg).unwrap();
 
         // All candidates get base weight 1.0 → effectively uniform.
@@ -5566,9 +5666,7 @@ mod tests {
 
     #[test]
     fn test_focus_teleport_single_candidate_is_focus() {
-        let tokens = vec![
-            Token::new("Rust", "rust", PosTag::Noun, 0, 4, 0, 0),
-        ];
+        let tokens = vec![Token::new("Rust", "rust", PosTag::Noun, 0, 4, 0, 0)];
         let stream = TokenStream::from_tokens(&tokens);
         let cfg = TextRankConfig::default();
         let cs = word_candidates(&stream, &cfg);
@@ -5584,9 +5682,7 @@ mod tests {
 
     #[test]
     fn test_focus_teleport_single_candidate_not_focus() {
-        let tokens = vec![
-            Token::new("Rust", "rust", PosTag::Noun, 0, 4, 0, 0),
-        ];
+        let tokens = vec![Token::new("Rust", "rust", PosTag::Noun, 0, 4, 0, 0)];
         let stream = TokenStream::from_tokens(&tokens);
         let cfg = TextRankConfig::default();
         let cs = word_candidates(&stream, &cfg);
@@ -5633,10 +5729,8 @@ mod tests {
         let cfg = TextRankConfig::default();
         let cs = word_candidates(&stream, &cfg);
 
-        let builder = FocusTermsTeleportBuilder::new(
-            vec!["word0".to_string(), "word1".to_string()],
-            20.0,
-        );
+        let builder =
+            FocusTermsTeleportBuilder::new(vec!["word0".to_string(), "word1".to_string()], 20.0);
         let tv = builder.build(stream.as_ref(), cs.as_ref(), &cfg).unwrap();
 
         assert!(tv.is_normalized(1e-10));
@@ -5681,11 +5775,15 @@ mod tests {
         let tv = builder.build(stream.as_ref(), cs.as_ref(), &cfg).unwrap();
 
         // Find the index of "machine" among candidates.
-        let machine_idx = cs.words().iter()
+        let machine_idx = cs
+            .words()
+            .iter()
             .position(|w| stream.pool().get(w.lemma_id) == Some("machine"))
             .unwrap();
         // Find any non-weighted candidate index.
-        let other_idx = cs.words().iter()
+        let other_idx = cs
+            .words()
+            .iter()
             .position(|w| stream.pool().get(w.lemma_id) != Some("machine"))
             .unwrap();
 
@@ -5709,10 +5807,14 @@ mod tests {
         let builder = TopicWeightsTeleportBuilder::new(weights, 0.01);
         let tv = builder.build(stream.as_ref(), cs.as_ref(), &cfg).unwrap();
 
-        let machine_idx = cs.words().iter()
+        let machine_idx = cs
+            .words()
+            .iter()
             .position(|w| stream.pool().get(w.lemma_id) == Some("machine"))
             .unwrap();
-        let rust_idx = cs.words().iter()
+        let rust_idx = cs
+            .words()
+            .iter()
             .position(|w| stream.pool().get(w.lemma_id) == Some("rust"))
             .unwrap();
 
@@ -5737,7 +5839,10 @@ mod tests {
         let tv = builder.build(stream.as_ref(), cs.as_ref(), &cfg).unwrap();
 
         // All non-"machine" candidates should have the same (lower) probability.
-        let non_machine: Vec<f64> = cs.words().iter().enumerate()
+        let non_machine: Vec<f64> = cs
+            .words()
+            .iter()
+            .enumerate()
             .filter(|(_, w)| stream.pool().get(w.lemma_id) != Some("machine"))
             .map(|(i, _)| tv[i])
             .collect();
@@ -5776,7 +5881,11 @@ mod tests {
         let cfg = TextRankConfig::default();
 
         let chunks = vec![ChunkSpan {
-            start_token: 0, end_token: 2, start_char: 0, end_char: 7, sentence_idx: 0,
+            start_token: 0,
+            end_token: 2,
+            start_char: 0,
+            end_char: 7,
+            sentence_idx: 0,
         }];
         let cs = PhraseCandidateSelector::new(chunks).select(stream.as_ref(), &cfg);
 
@@ -5843,11 +5952,7 @@ mod tests {
         let stream = TokenStream::from_tokens(&tokens);
         let cfg = TextRankConfig::default();
         let cs = word_candidates(&stream, &cfg);
-        let graph = CooccurrenceGraphBuilder::default().build(
-            stream.as_ref(),
-            cs.as_ref(),
-            &cfg,
-        );
+        let graph = CooccurrenceGraphBuilder::default().build(stream.as_ref(), cs.as_ref(), &cfg);
         (stream, cs, graph)
     }
 
@@ -6107,11 +6212,7 @@ mod tests {
         let stream = TokenStream::from_tokens(tokens);
         let cfg = TextRankConfig::default();
         let cs = WordNodeSelector.select(stream.as_ref(), &cfg);
-        let graph = CooccurrenceGraphBuilder::default().build(
-            stream.as_ref(),
-            cs.as_ref(),
-            &cfg,
-        );
+        let graph = CooccurrenceGraphBuilder::default().build(stream.as_ref(), cs.as_ref(), &cfg);
         let ranks = PageRankRanker.rank(&graph, None, &cfg);
         (stream, cs, graph, ranks)
     }
@@ -6149,13 +6250,7 @@ mod tests {
         let (stream, cs, graph, ranks) = build_full_pipeline(&tokens);
         let cfg = TextRankConfig::default();
 
-        let phrases = ChunkPhraseBuilder.build(
-            stream.as_ref(),
-            cs.as_ref(),
-            &ranks,
-            &graph,
-            &cfg,
-        );
+        let phrases = ChunkPhraseBuilder.build(stream.as_ref(), cs.as_ref(), &ranks, &graph, &cfg);
 
         // Should produce at least one phrase.
         assert!(
@@ -6181,13 +6276,7 @@ mod tests {
         let mut cfg = TextRankConfig::default();
         cfg.top_n = 1;
 
-        let phrases = ChunkPhraseBuilder.build(
-            stream.as_ref(),
-            cs.as_ref(),
-            &ranks,
-            &graph,
-            &cfg,
-        );
+        let phrases = ChunkPhraseBuilder.build(stream.as_ref(), cs.as_ref(), &ranks, &graph, &cfg);
 
         assert!(
             phrases.len() <= 1,
@@ -6201,39 +6290,21 @@ mod tests {
         let stream = TokenStream::from_tokens(&[]);
         let cfg = TextRankConfig::default();
         let cs = WordNodeSelector.select(stream.as_ref(), &cfg);
-        let graph = CooccurrenceGraphBuilder::default().build(
-            stream.as_ref(),
-            cs.as_ref(),
-            &cfg,
-        );
+        let graph = CooccurrenceGraphBuilder::default().build(stream.as_ref(), cs.as_ref(), &cfg);
         let ranks = PageRankRanker.rank(&graph, None, &cfg);
 
-        let phrases = ChunkPhraseBuilder.build(
-            stream.as_ref(),
-            cs.as_ref(),
-            &ranks,
-            &graph,
-            &cfg,
-        );
+        let phrases = ChunkPhraseBuilder.build(stream.as_ref(), cs.as_ref(), &ranks, &graph, &cfg);
 
         assert!(phrases.is_empty());
     }
 
     #[test]
     fn test_chunk_phrase_builder_single_noun() {
-        let tokens = vec![
-            Token::new("Rust", "rust", PosTag::Noun, 0, 4, 0, 0),
-        ];
+        let tokens = vec![Token::new("Rust", "rust", PosTag::Noun, 0, 4, 0, 0)];
         let (stream, cs, graph, ranks) = build_full_pipeline(&tokens);
         let cfg = TextRankConfig::default();
 
-        let phrases = ChunkPhraseBuilder.build(
-            stream.as_ref(),
-            cs.as_ref(),
-            &ranks,
-            &graph,
-            &cfg,
-        );
+        let phrases = ChunkPhraseBuilder.build(stream.as_ref(), cs.as_ref(), &ranks, &graph, &cfg);
 
         // Single noun should produce one single-word phrase.
         assert_eq!(phrases.len(), 1);
@@ -6254,13 +6325,7 @@ mod tests {
         let (stream, cs, graph, ranks) = build_full_pipeline(&tokens);
         let cfg = TextRankConfig::default();
 
-        let phrases = ChunkPhraseBuilder.build(
-            stream.as_ref(),
-            cs.as_ref(),
-            &ranks,
-            &graph,
-            &cfg,
-        );
+        let phrases = ChunkPhraseBuilder.build(stream.as_ref(), cs.as_ref(), &ranks, &graph, &cfg);
 
         // No noun chunks → no phrases.
         assert!(phrases.is_empty());
@@ -6273,13 +6338,7 @@ mod tests {
         let mut cfg = TextRankConfig::default();
         cfg.top_n = 20; // Don't limit.
 
-        let phrases = ChunkPhraseBuilder.build(
-            stream.as_ref(),
-            cs.as_ref(),
-            &ranks,
-            &graph,
-            &cfg,
-        );
+        let phrases = ChunkPhraseBuilder.build(stream.as_ref(), cs.as_ref(), &ranks, &graph, &cfg);
 
         // Phrases should be in descending score order.
         for w in phrases.entries().windows(2) {
@@ -6298,13 +6357,7 @@ mod tests {
         let (stream, cs, graph, ranks) = build_full_pipeline(&tokens);
         let cfg = TextRankConfig::default();
 
-        let phrases = ChunkPhraseBuilder.build(
-            stream.as_ref(),
-            cs.as_ref(),
-            &ranks,
-            &graph,
-            &cfg,
-        );
+        let phrases = ChunkPhraseBuilder.build(stream.as_ref(), cs.as_ref(), &ranks, &graph, &cfg);
 
         // All phrase entries from ChunkPhraseBuilder (bridged via
         // PhraseSet::from_phrases) should have surface and lemma_text
@@ -6332,13 +6385,7 @@ mod tests {
         let mut cfg = TextRankConfig::default();
         cfg.min_phrase_length = 2; // Only multi-word phrases.
 
-        let phrases = ChunkPhraseBuilder.build(
-            stream.as_ref(),
-            cs.as_ref(),
-            &ranks,
-            &graph,
-            &cfg,
-        );
+        let phrases = ChunkPhraseBuilder.build(stream.as_ref(), cs.as_ref(), &ranks, &graph, &cfg);
 
         // All phrases should have at least 2 lemma tokens.
         for entry in phrases.entries() {
@@ -6357,13 +6404,7 @@ mod tests {
         let mut cfg = TextRankConfig::default();
         cfg.max_phrase_length = 1; // Only single-word phrases.
 
-        let phrases = ChunkPhraseBuilder.build(
-            stream.as_ref(),
-            cs.as_ref(),
-            &ranks,
-            &graph,
-            &cfg,
-        );
+        let phrases = ChunkPhraseBuilder.build(stream.as_ref(), cs.as_ref(), &ranks, &graph, &cfg);
 
         // All phrases should have at most 1 lemma token.
         for entry in phrases.entries() {
@@ -6381,20 +6422,8 @@ mod tests {
         let (stream, cs, graph, ranks) = build_full_pipeline(&tokens);
         let cfg = TextRankConfig::default();
 
-        let phrases1 = ChunkPhraseBuilder.build(
-            stream.as_ref(),
-            cs.as_ref(),
-            &ranks,
-            &graph,
-            &cfg,
-        );
-        let phrases2 = ChunkPhraseBuilder.build(
-            stream.as_ref(),
-            cs.as_ref(),
-            &ranks,
-            &graph,
-            &cfg,
-        );
+        let phrases1 = ChunkPhraseBuilder.build(stream.as_ref(), cs.as_ref(), &ranks, &graph, &cfg);
+        let phrases2 = ChunkPhraseBuilder.build(stream.as_ref(), cs.as_ref(), &ranks, &graph, &cfg);
 
         assert_eq!(phrases1.len(), phrases2.len());
         for (a, b) in phrases1.entries().iter().zip(phrases2.entries()) {
@@ -6412,13 +6441,7 @@ mod tests {
         let (stream, cs, graph, ranks) = build_full_pipeline(&tokens);
         let cfg = TextRankConfig::default();
 
-        let phrases = builder.build(
-            stream.as_ref(),
-            cs.as_ref(),
-            &ranks,
-            &graph,
-            &cfg,
-        );
+        let phrases = builder.build(stream.as_ref(), cs.as_ref(), &ranks, &graph, &cfg);
 
         assert!(!phrases.is_empty());
     }
@@ -6437,21 +6460,12 @@ mod tests {
         let stream = TokenStream::from_tokens(&tokens);
         let cfg = TextRankConfig::default();
         let cs = WordNodeSelector.select(stream.as_ref(), &cfg);
-        let graph = CooccurrenceGraphBuilder::default().build(
-            stream.as_ref(),
-            cs.as_ref(),
-            &cfg,
-        );
+        let graph = CooccurrenceGraphBuilder::default().build(stream.as_ref(), cs.as_ref(), &cfg);
 
         // Standard ranks.
         let standard_ranks = PageRankRanker.rank(&graph, None, &cfg);
-        let standard_phrases = ChunkPhraseBuilder.build(
-            stream.as_ref(),
-            cs.as_ref(),
-            &standard_ranks,
-            &graph,
-            &cfg,
-        );
+        let standard_phrases =
+            ChunkPhraseBuilder.build(stream.as_ref(), cs.as_ref(), &standard_ranks, &graph, &cfg);
 
         // Biased ranks: heavily bias node 0.
         let mut tv = TeleportVector::zeros(graph.num_nodes(), TeleportType::Focus);
@@ -6463,13 +6477,8 @@ mod tests {
             tv.normalize();
         }
         let biased_ranks = PageRankRanker.rank(&graph, Some(&tv), &cfg);
-        let biased_phrases = ChunkPhraseBuilder.build(
-            stream.as_ref(),
-            cs.as_ref(),
-            &biased_ranks,
-            &graph,
-            &cfg,
-        );
+        let biased_phrases =
+            ChunkPhraseBuilder.build(stream.as_ref(), cs.as_ref(), &biased_ranks, &graph, &cfg);
 
         // Both should produce phrases.
         assert!(!standard_phrases.is_empty());
@@ -6477,9 +6486,12 @@ mod tests {
 
         // The scores should differ (personalization changes the distribution).
         // At least one phrase should have a different score.
-        let standard_scores: Vec<f64> = standard_phrases.entries().iter().map(|e| e.score).collect();
+        let standard_scores: Vec<f64> =
+            standard_phrases.entries().iter().map(|e| e.score).collect();
         let biased_scores: Vec<f64> = biased_phrases.entries().iter().map(|e| e.score).collect();
-        let any_different = standard_scores.iter().zip(biased_scores.iter())
+        let any_different = standard_scores
+            .iter()
+            .zip(biased_scores.iter())
             .any(|(&s, &b)| (s - b).abs() > 1e-10);
         assert!(
             any_different || standard_scores.len() != biased_scores.len(),
@@ -6497,20 +6509,11 @@ mod tests {
         let cs = WordNodeSelector.select(stream.as_ref(), &cfg);
 
         // Cross-sentence graph (SingleRank-style).
-        let graph = CooccurrenceGraphBuilder::single_rank().build(
-            stream.as_ref(),
-            cs.as_ref(),
-            &cfg,
-        );
+        let graph =
+            CooccurrenceGraphBuilder::single_rank().build(stream.as_ref(), cs.as_ref(), &cfg);
         let ranks = PageRankRanker.rank(&graph, None, &cfg);
 
-        let phrases = ChunkPhraseBuilder.build(
-            stream.as_ref(),
-            cs.as_ref(),
-            &ranks,
-            &graph,
-            &cfg,
-        );
+        let phrases = ChunkPhraseBuilder.build(stream.as_ref(), cs.as_ref(), &ranks, &graph, &cfg);
 
         assert!(
             !phrases.is_empty(),
@@ -6526,13 +6529,7 @@ mod tests {
     fn build_phrases(tokens: &[Token]) -> (PhraseSet, RankOutput) {
         let (stream, cs, graph, ranks) = build_full_pipeline(tokens);
         let cfg = TextRankConfig::default();
-        let phrases = ChunkPhraseBuilder.build(
-            stream.as_ref(),
-            cs.as_ref(),
-            &ranks,
-            &graph,
-            &cfg,
-        );
+        let phrases = ChunkPhraseBuilder.build(stream.as_ref(), cs.as_ref(), &ranks, &graph, &cfg);
         (phrases, ranks)
     }
 
@@ -6586,11 +6583,7 @@ mod tests {
         let result = StandardResultFormatter.format(&phrases, &ranks, None, &cfg);
 
         for (i, phrase) in result.phrases.iter().enumerate() {
-            assert_eq!(
-                phrase.rank,
-                i + 1,
-                "Rank should be 1-indexed sequential"
-            );
+            assert_eq!(phrase.rank, i + 1, "Rank should be 1-indexed sequential");
         }
     }
 
@@ -6660,8 +6653,7 @@ mod tests {
             cluster_memberships: None,
         };
 
-        let result =
-            StandardResultFormatter.format(&phrases, &ranks, Some(debug), &cfg);
+        let result = StandardResultFormatter.format(&phrases, &ranks, Some(debug), &cfg);
 
         assert!(result.debug.is_some(), "Debug payload should be attached");
         let d = result.debug.unwrap();
@@ -6673,14 +6665,12 @@ mod tests {
 
     #[test]
     fn test_standard_formatter_empty_phrases() {
-        let ranks = RankOutput::from_pagerank_result(
-            &crate::pagerank::PageRankResult {
-                scores: vec![],
-                iterations: 0,
-                delta: 0.0,
-                converged: true,
-            },
-        );
+        let ranks = RankOutput::from_pagerank_result(&crate::pagerank::PageRankResult {
+            scores: vec![],
+            iterations: 0,
+            delta: 0.0,
+            converged: true,
+        });
         let phrases = PhraseSet::from_entries(vec![]);
         let cfg = TextRankConfig::default();
 
@@ -6705,14 +6695,12 @@ mod tests {
             spans: Some(vec![(0, 16), (42, 55)]),
         };
         let phrases = PhraseSet::from_entries(vec![entry]);
-        let ranks = RankOutput::from_pagerank_result(
-            &crate::pagerank::PageRankResult {
-                scores: vec![0.5, 0.3],
-                iterations: 50,
-                delta: 1e-7,
-                converged: true,
-            },
-        );
+        let ranks = RankOutput::from_pagerank_result(&crate::pagerank::PageRankResult {
+            scores: vec![0.5, 0.3],
+            iterations: 50,
+            delta: 1e-7,
+            converged: true,
+        });
         let cfg = TextRankConfig::default();
 
         let result = StandardResultFormatter.format(&phrases, &ranks, None, &cfg);
@@ -6740,14 +6728,12 @@ mod tests {
             spans: None,
         };
         let phrases = PhraseSet::from_entries(vec![entry]);
-        let ranks = RankOutput::from_pagerank_result(
-            &crate::pagerank::PageRankResult {
-                scores: vec![0.8],
-                iterations: 10,
-                delta: 1e-6,
-                converged: true,
-            },
-        );
+        let ranks = RankOutput::from_pagerank_result(&crate::pagerank::PageRankResult {
+            scores: vec![0.8],
+            iterations: 10,
+            delta: 1e-6,
+            converged: true,
+        });
         let cfg = TextRankConfig::default();
 
         let result = StandardResultFormatter.format(&phrases, &ranks, None, &cfg);
@@ -6766,19 +6752,9 @@ mod tests {
         let stream = TokenStream::from_tokens(&tokens);
         let cfg = TextRankConfig::default();
         let cs = WordNodeSelector.select(stream.as_ref(), &cfg);
-        let graph = CooccurrenceGraphBuilder::default().build(
-            stream.as_ref(),
-            cs.as_ref(),
-            &cfg,
-        );
+        let graph = CooccurrenceGraphBuilder::default().build(stream.as_ref(), cs.as_ref(), &cfg);
         let ranks = PageRankRanker.rank(&graph, None, &cfg);
-        let phrases = ChunkPhraseBuilder.build(
-            stream.as_ref(),
-            cs.as_ref(),
-            &ranks,
-            &graph,
-            &cfg,
-        );
+        let phrases = ChunkPhraseBuilder.build(stream.as_ref(), cs.as_ref(), &ranks, &graph, &cfg);
 
         let result = StandardResultFormatter.format(&phrases, &ranks, None, &cfg);
 
@@ -6822,14 +6798,12 @@ mod tests {
             },
         ];
         let phrases = PhraseSet::from_entries(entries);
-        let ranks = RankOutput::from_pagerank_result(
-            &crate::pagerank::PageRankResult {
-                scores: vec![0.3, 0.9],
-                iterations: 10,
-                delta: 1e-7,
-                converged: true,
-            },
-        );
+        let ranks = RankOutput::from_pagerank_result(&crate::pagerank::PageRankResult {
+            scores: vec![0.3, 0.9],
+            iterations: 10,
+            delta: 1e-7,
+            converged: true,
+        });
         let cfg = TextRankConfig::default();
 
         let result = StandardResultFormatter.format(&phrases, &ranks, None, &cfg);
@@ -6865,14 +6839,12 @@ mod tests {
             },
         ];
         let phrases = PhraseSet::from_entries(entries);
-        let ranks = RankOutput::from_pagerank_result(
-            &crate::pagerank::PageRankResult {
-                scores: vec![0.5, 0.5],
-                iterations: 10,
-                delta: 1e-7,
-                converged: true,
-            },
-        );
+        let ranks = RankOutput::from_pagerank_result(&crate::pagerank::PageRankResult {
+            scores: vec![0.5, 0.5],
+            iterations: 10,
+            delta: 1e-7,
+            converged: true,
+        });
         let mut cfg = TextRankConfig::default();
         cfg.determinism = DeterminismMode::Deterministic;
 
@@ -6911,14 +6883,12 @@ mod tests {
             },
         ];
         let phrases = PhraseSet::from_entries(entries);
-        let ranks = RankOutput::from_pagerank_result(
-            &crate::pagerank::PageRankResult {
-                scores: vec![0.5, 0.5],
-                iterations: 10,
-                delta: 1e-7,
-                converged: true,
-            },
-        );
+        let ranks = RankOutput::from_pagerank_result(&crate::pagerank::PageRankResult {
+            scores: vec![0.5, 0.5],
+            iterations: 10,
+            delta: 1e-7,
+            converged: true,
+        });
         let mut cfg = TextRankConfig::default();
         cfg.determinism = DeterminismMode::Deterministic;
 
@@ -6957,14 +6927,12 @@ mod tests {
             },
         ];
         let phrases = PhraseSet::from_entries(entries);
-        let ranks = RankOutput::from_pagerank_result(
-            &crate::pagerank::PageRankResult {
-                scores: vec![0.5, 0.5],
-                iterations: 10,
-                delta: 1e-7,
-                converged: true,
-            },
-        );
+        let ranks = RankOutput::from_pagerank_result(&crate::pagerank::PageRankResult {
+            scores: vec![0.5, 0.5],
+            iterations: 10,
+            delta: 1e-7,
+            converged: true,
+        });
         let mut cfg = TextRankConfig::default();
         cfg.determinism = DeterminismMode::Deterministic;
 
@@ -7010,14 +6978,12 @@ mod tests {
             },
         ];
         let phrases = PhraseSet::from_entries(entries);
-        let ranks = RankOutput::from_pagerank_result(
-            &crate::pagerank::PageRankResult {
-                scores: vec![0.5, 0.5, 0.7],
-                iterations: 10,
-                delta: 1e-7,
-                converged: true,
-            },
-        );
+        let ranks = RankOutput::from_pagerank_result(&crate::pagerank::PageRankResult {
+            scores: vec![0.5, 0.5, 0.7],
+            iterations: 10,
+            delta: 1e-7,
+            converged: true,
+        });
         let mut cfg = TextRankConfig::default();
         cfg.determinism = DeterminismMode::Deterministic;
 
@@ -7074,7 +7040,8 @@ mod tests {
             assert!(
                 a.score >= d.score,
                 "Earlier word 'alpha' (score={}) should score >= later word 'delta' (score={})",
-                a.score, d.score
+                a.score,
+                d.score
             );
         }
     }
@@ -7098,7 +7065,10 @@ mod tests {
 
         assert_eq!(r1.phrases.len(), r2.phrases.len());
         for (p1, p2) in r1.phrases.iter().zip(r2.phrases.iter()) {
-            assert_eq!(p1.lemma, p2.lemma, "Phrase ordering should be deterministic");
+            assert_eq!(
+                p1.lemma, p2.lemma,
+                "Phrase ordering should be deterministic"
+            );
             assert!(
                 (p1.score - p2.score).abs() < 1e-12,
                 "Scores should be identical across runs"
@@ -7116,22 +7086,23 @@ mod tests {
         // Run with "rust" focused.
         let stream = TokenStream::from_tokens(&tokens);
         let mut obs = NoopObserver;
-        let focused = BiasedTextRankPipeline::biased(
-            vec!["rust".to_string()],
-            20.0,
-        ).run(stream, &cfg, &mut obs);
+        let focused = BiasedTextRankPipeline::biased(vec!["rust".to_string()], 20.0)
+            .run(stream, &cfg, &mut obs);
 
         // Run with no focus (uniform teleport = base textrank).
         let stream2 = TokenStream::from_tokens(&tokens);
         let mut obs2 = NoopObserver;
-        let baseline = BaseTextRankPipeline::base_textrank()
-            .run(stream2, &cfg, &mut obs2);
+        let baseline = BaseTextRankPipeline::base_textrank().run(stream2, &cfg, &mut obs2);
 
         // "rust" should have a higher score in the focused run.
-        let rust_focused = focused.phrases.iter()
+        let rust_focused = focused
+            .phrases
+            .iter()
             .find(|p| p.lemma.contains("rust"))
             .map(|p| p.score);
-        let rust_baseline = baseline.phrases.iter()
+        let rust_baseline = baseline
+            .phrases
+            .iter()
             .find(|p| p.lemma.contains("rust"))
             .map(|p| p.score);
 
@@ -7153,10 +7124,8 @@ mod tests {
         let run = || {
             let stream = TokenStream::from_tokens(&tokens);
             let mut obs = NoopObserver;
-            BiasedTextRankPipeline::biased(
-                vec!["machine".to_string()],
-                10.0,
-            ).run(stream, &cfg, &mut obs)
+            BiasedTextRankPipeline::biased(vec!["machine".to_string()], 10.0)
+                .run(stream, &cfg, &mut obs)
         };
 
         let r1 = run();
@@ -7164,7 +7133,10 @@ mod tests {
 
         assert_eq!(r1.phrases.len(), r2.phrases.len());
         for (p1, p2) in r1.phrases.iter().zip(r2.phrases.iter()) {
-            assert_eq!(p1.lemma, p2.lemma, "Phrase ordering should be deterministic");
+            assert_eq!(
+                p1.lemma, p2.lemma,
+                "Phrase ordering should be deterministic"
+            );
             assert!(
                 (p1.score - p2.score).abs() < 1e-12,
                 "Scores should be identical across runs"
@@ -7299,9 +7271,27 @@ mod tests {
 
     fn topic_test_chunks() -> Vec<ChunkSpan> {
         vec![
-            ChunkSpan { start_token: 0, end_token: 2, start_char: 0, end_char: 16, sentence_idx: 0 },
-            ChunkSpan { start_token: 3, end_token: 5, start_char: 20, end_char: 33, sentence_idx: 1 },
-            ChunkSpan { start_token: 6, end_token: 8, start_char: 41, end_char: 56, sentence_idx: 2 },
+            ChunkSpan {
+                start_token: 0,
+                end_token: 2,
+                start_char: 0,
+                end_char: 16,
+                sentence_idx: 0,
+            },
+            ChunkSpan {
+                start_token: 3,
+                end_token: 5,
+                start_char: 20,
+                end_char: 33,
+                sentence_idx: 1,
+            },
+            ChunkSpan {
+                start_token: 6,
+                end_token: 8,
+                start_char: 41,
+                end_char: 56,
+                sentence_idx: 2,
+            },
         ]
     }
 
@@ -7369,8 +7359,11 @@ mod tests {
 
         let sel1 = PhraseCandidateSelector::new(chunks.clone());
         let cands1 = sel1.select(stream.as_ref(), &cfg);
-        let g1 = TopicGraphBuilder::new(JaccardHacClusterer::topic_rank())
-            .build(stream.as_ref(), cands1.as_ref(), &cfg);
+        let g1 = TopicGraphBuilder::new(JaccardHacClusterer::topic_rank()).build(
+            stream.as_ref(),
+            cands1.as_ref(),
+            &cfg,
+        );
 
         let sel2 = PhraseCandidateSelector::new(chunks);
         let cands2 = sel2.select(stream.as_ref(), &cfg);
@@ -7438,8 +7431,20 @@ mod tests {
             Token::new("learning", "learning", PosTag::Noun, 25, 33, 1, 3),
         ];
         let chunks = vec![
-            ChunkSpan { start_token: 0, end_token: 2, start_char: 0, end_char: 16, sentence_idx: 0 },
-            ChunkSpan { start_token: 2, end_token: 4, start_char: 17, end_char: 33, sentence_idx: 1 },
+            ChunkSpan {
+                start_token: 0,
+                end_token: 2,
+                start_char: 0,
+                end_char: 16,
+                sentence_idx: 0,
+            },
+            ChunkSpan {
+                start_token: 2,
+                end_token: 4,
+                start_char: 17,
+                end_char: 33,
+                sentence_idx: 1,
+            },
         ];
 
         let stream = TokenStream::from_tokens(&tokens);
@@ -7611,11 +7616,7 @@ mod tests {
         //   s0 = {1, 2, 3}
         //   s1 = {2, 3, 4}       overlap with s0: {2,3} → J = 2/4 = 0.5
         //   s2 = {5, 6}          disjoint from s0, s1 → J = 0
-        let candidates = make_sentence_candidates(vec![
-            vec![1, 2, 3],
-            vec![2, 3, 4],
-            vec![5, 6],
-        ]);
+        let candidates = make_sentence_candidates(vec![vec![1, 2, 3], vec![2, 3, 4], vec![5, 6]]);
         let tokens: Vec<Token> = Vec::new();
         let stream = TokenStream::from_tokens(&tokens);
         let cfg = TextRankConfig::default();
@@ -7628,19 +7629,22 @@ mod tests {
         assert_eq!(graph.num_edges(), 2); // 1 undirected = 2 directed
 
         // Check the edge weight between s0 and s1.
-        let weight_01: f64 = graph.neighbors(0).find(|(nb, _)| *nb == 1).map(|(_, w)| w).unwrap();
-        assert!((weight_01 - 0.5).abs() < 1e-10, "Expected 0.5, got {weight_01}");
+        let weight_01: f64 = graph
+            .neighbors(0)
+            .find(|(nb, _)| *nb == 1)
+            .map(|(_, w)| w)
+            .unwrap();
+        assert!(
+            (weight_01 - 0.5).abs() < 1e-10,
+            "Expected 0.5, got {weight_01}"
+        );
     }
 
     #[cfg(feature = "sentence-rank")]
     #[test]
     fn test_sentence_graph_builder_threshold() {
         // Same 3 sentences, but min_similarity=0.6 should filter the 0.5-edge.
-        let candidates = make_sentence_candidates(vec![
-            vec![1, 2, 3],
-            vec![2, 3, 4],
-            vec![5, 6],
-        ]);
+        let candidates = make_sentence_candidates(vec![vec![1, 2, 3], vec![2, 3, 4], vec![5, 6]]);
         let tokens: Vec<Token> = Vec::new();
         let stream = TokenStream::from_tokens(&tokens);
         let cfg = TextRankConfig::default();
@@ -7749,13 +7753,16 @@ mod tests {
         transform.transform(&mut graph, stream.as_ref(), candidates.as_ref(), &cfg);
 
         // At least some inter-cluster edges should have positive weight.
-        let has_inter = (0..graph.num_nodes())
-            .any(|node| {
-                let cluster = assignments.cluster_of(node);
-                graph.neighbors(node as u32)
-                    .any(|(nb, w)| assignments.cluster_of(nb as usize) != cluster && w > 0.0)
-            });
-        assert!(has_inter, "Should have at least one positive inter-cluster edge");
+        let has_inter = (0..graph.num_nodes()).any(|node| {
+            let cluster = assignments.cluster_of(node);
+            graph
+                .neighbors(node as u32)
+                .any(|(nb, w)| assignments.cluster_of(nb as usize) != cluster && w > 0.0)
+        });
+        assert!(
+            has_inter,
+            "Should have at least one positive inter-cluster edge"
+        );
     }
 
     #[test]
@@ -7776,12 +7783,20 @@ mod tests {
         let mut graph_with_boost = builder2.build(stream.as_ref(), candidates2.as_ref(), &cfg);
 
         // Alpha=0 → no boost phase.
-        MultipartiteTransform::with_alpha(0.0)
-            .transform(&mut graph_no_boost, stream.as_ref(), candidates.as_ref(), &cfg);
+        MultipartiteTransform::with_alpha(0.0).transform(
+            &mut graph_no_boost,
+            stream.as_ref(),
+            candidates.as_ref(),
+            &cfg,
+        );
 
         // Alpha=1.1 → boost phase runs.
-        MultipartiteTransform::new()
-            .transform(&mut graph_with_boost, stream.as_ref(), candidates2.as_ref(), &cfg);
+        MultipartiteTransform::new().transform(
+            &mut graph_with_boost,
+            stream.as_ref(),
+            candidates2.as_ref(),
+            &cfg,
+        );
 
         // Intra-cluster edges should be identically zeroed in both.
         // Inter-cluster edges may differ if boost applied.
@@ -7789,8 +7804,7 @@ mod tests {
         let num_clusters = assignments.num_clusters();
 
         // Check that any multi-member cluster causes a weight difference.
-        let has_multi_member = (0..num_clusters)
-            .any(|c| assignments.members_of(c).len() > 1);
+        let has_multi_member = (0..num_clusters).any(|c| assignments.members_of(c).len() > 1);
 
         if has_multi_member {
             // At least one inter-cluster weight should differ.
@@ -7801,7 +7815,10 @@ mod tests {
                     nb_iter.into_iter().zip(wb_iter)
                 })
                 .any(|((_, w1), (_, w2))| (w1 - w2).abs() > 1e-10);
-            assert!(any_diff, "Alpha=1.1 should produce different weights than alpha=0");
+            assert!(
+                any_diff,
+                "Alpha=1.1 should produce different weights than alpha=0"
+            );
         }
     }
 
@@ -7869,8 +7886,20 @@ mod tests {
             Token::new("learning", "learning", PosTag::Noun, 25, 33, 1, 3),
         ];
         let chunks = vec![
-            ChunkSpan { start_token: 0, end_token: 2, start_char: 0, end_char: 16, sentence_idx: 0 },
-            ChunkSpan { start_token: 2, end_token: 4, start_char: 17, end_char: 33, sentence_idx: 1 },
+            ChunkSpan {
+                start_token: 0,
+                end_token: 2,
+                start_char: 0,
+                end_char: 16,
+                sentence_idx: 0,
+            },
+            ChunkSpan {
+                start_token: 2,
+                end_token: 4,
+                start_char: 17,
+                end_char: 33,
+                sentence_idx: 1,
+            },
         ];
 
         let stream = TokenStream::from_tokens(&tokens);
@@ -7880,8 +7909,12 @@ mod tests {
 
         let builder = CandidateGraphBuilder::new(JaccardHacClusterer::new(0.26));
         let mut graph = builder.build(stream.as_ref(), candidates.as_ref(), &cfg);
-        MultipartiteTransform::new()
-            .transform(&mut graph, stream.as_ref(), candidates.as_ref(), &cfg);
+        MultipartiteTransform::new().transform(
+            &mut graph,
+            stream.as_ref(),
+            candidates.as_ref(),
+            &cfg,
+        );
         let ranks = PageRankRanker.rank(&graph, None, &cfg);
 
         let phrases = MultipartitePhraseBuilder.build(
@@ -7893,10 +7926,18 @@ mod tests {
         );
 
         // Both occurrences have the same lemma → grouped into 1 phrase.
-        assert_eq!(phrases.len(), 1, "Same-lemma candidates should group into 1 phrase");
+        assert_eq!(
+            phrases.len(),
+            1,
+            "Same-lemma candidates should group into 1 phrase"
+        );
         let entry = &phrases.entries()[0];
         assert_eq!(entry.count, 2, "Should count both occurrences");
-        assert_eq!(entry.spans.as_ref().unwrap().len(), 2, "Should collect both spans");
+        assert_eq!(
+            entry.spans.as_ref().unwrap().len(),
+            2,
+            "Should collect both spans"
+        );
     }
 
     #[test]
@@ -7909,8 +7950,12 @@ mod tests {
 
         let builder = CandidateGraphBuilder::new(JaccardHacClusterer::new(0.26));
         let mut graph = builder.build(stream.as_ref(), candidates.as_ref(), &cfg);
-        MultipartiteTransform::new()
-            .transform(&mut graph, stream.as_ref(), candidates.as_ref(), &cfg);
+        MultipartiteTransform::new().transform(
+            &mut graph,
+            stream.as_ref(),
+            candidates.as_ref(),
+            &cfg,
+        );
         let ranks = PageRankRanker.rank(&graph, None, &cfg);
 
         let phrases = MultipartitePhraseBuilder.build(
@@ -7944,8 +7989,12 @@ mod tests {
 
         let builder = CandidateGraphBuilder::new(JaccardHacClusterer::new(0.26));
         let mut graph = builder.build(stream.as_ref(), candidates.as_ref(), &cfg);
-        MultipartiteTransform::new()
-            .transform(&mut graph, stream.as_ref(), candidates.as_ref(), &cfg);
+        MultipartiteTransform::new().transform(
+            &mut graph,
+            stream.as_ref(),
+            candidates.as_ref(),
+            &cfg,
+        );
         let ranks = PageRankRanker.rank(&graph, None, &cfg);
 
         let phrases = MultipartitePhraseBuilder.build(
@@ -7956,7 +8005,10 @@ mod tests {
             &cfg,
         );
 
-        assert!(phrases.len() <= 1, "top_n=1 should produce at most 1 phrase");
+        assert!(
+            phrases.len() <= 1,
+            "top_n=1 should produce at most 1 phrase"
+        );
     }
 
     // ─── SentenceCandidateSelector tests ────────────────────────────────
@@ -8002,7 +8054,8 @@ mod tests {
     ) -> (TokenStream, CandidateSet, Graph, RankOutput) {
         let stream = TokenStream::from_tokens(tokens);
         let candidates = SentenceCandidateSelector.select(stream.as_ref(), cfg);
-        let graph = SentenceGraphBuilder::default().build(stream.as_ref(), candidates.as_ref(), cfg);
+        let graph =
+            SentenceGraphBuilder::default().build(stream.as_ref(), candidates.as_ref(), cfg);
         let ranks = PageRankRanker.rank(&graph, None, cfg);
         (stream, candidates, graph, ranks)
     }
@@ -8014,20 +8067,18 @@ mod tests {
         let cfg = TextRankConfig::default();
         let (stream, candidates, graph, ranks) = sentence_pipeline_artifacts(&tokens, &cfg);
 
-        let phrases = SentencePhraseBuilder.build(
-            stream.as_ref(),
-            candidates.as_ref(),
-            &ranks,
-            &graph,
-            &cfg,
-        );
+        let phrases =
+            SentencePhraseBuilder.build(stream.as_ref(), candidates.as_ref(), &ranks, &graph, &cfg);
 
         assert_eq!(phrases.len(), 2, "should have 2 sentence entries");
 
         // Every entry should have non-zero score and non-empty surface text.
         for entry in phrases.entries() {
             assert!(entry.score > 0.0, "score should be positive");
-            assert!(entry.surface.as_ref().unwrap().len() > 0, "surface should be non-empty");
+            assert!(
+                entry.surface.as_ref().unwrap().len() > 0,
+                "surface should be non-empty"
+            );
             assert!(entry.count == 1, "count should be 1 for sentences");
             assert!(entry.spans.is_some(), "spans should be present");
         }
@@ -8047,16 +8098,12 @@ mod tests {
         let cfg = TextRankConfig::default();
         let stream = TokenStream::from_tokens(&tokens);
         let candidates = WordNodeSelector.select(stream.as_ref(), &cfg);
-        let graph = WindowGraphBuilder::base_textrank().build(stream.as_ref(), candidates.as_ref(), &cfg);
+        let graph =
+            WindowGraphBuilder::base_textrank().build(stream.as_ref(), candidates.as_ref(), &cfg);
         let ranks = PageRankRanker.rank(&graph, None, &cfg);
 
-        let phrases = SentencePhraseBuilder.build(
-            stream.as_ref(),
-            candidates.as_ref(),
-            &ranks,
-            &graph,
-            &cfg,
-        );
+        let phrases =
+            SentencePhraseBuilder.build(stream.as_ref(), candidates.as_ref(), &ranks, &graph, &cfg);
 
         assert!(phrases.is_empty(), "should be empty for word candidates");
     }
@@ -8067,16 +8114,12 @@ mod tests {
         let cfg = TextRankConfig::default();
         let stream = TokenStream::from_tokens(&[]);
         let candidates = SentenceCandidateSelector.select(stream.as_ref(), &cfg);
-        let graph = SentenceGraphBuilder::default().build(stream.as_ref(), candidates.as_ref(), &cfg);
+        let graph =
+            SentenceGraphBuilder::default().build(stream.as_ref(), candidates.as_ref(), &cfg);
         let ranks = PageRankRanker.rank(&graph, None, &cfg);
 
-        let phrases = SentencePhraseBuilder.build(
-            stream.as_ref(),
-            candidates.as_ref(),
-            &ranks,
-            &graph,
-            &cfg,
-        );
+        let phrases =
+            SentencePhraseBuilder.build(stream.as_ref(), candidates.as_ref(), &ranks, &graph, &cfg);
 
         assert!(phrases.is_empty(), "should be empty for no sentences");
     }
@@ -8095,13 +8138,8 @@ mod tests {
         let (stream, candidates, graph, ranks) = sentence_pipeline_artifacts(&tokens, &cfg);
         assert_eq!(candidates.len(), 3, "should have 3 sentence candidates");
 
-        let phrases = SentencePhraseBuilder.build(
-            stream.as_ref(),
-            candidates.as_ref(),
-            &ranks,
-            &graph,
-            &cfg,
-        );
+        let phrases =
+            SentencePhraseBuilder.build(stream.as_ref(), candidates.as_ref(), &ranks, &graph, &cfg);
 
         assert_eq!(phrases.len(), 2, "should be truncated to top_n=2");
     }
@@ -8117,13 +8155,8 @@ mod tests {
         let cfg = TextRankConfig::default();
         let (stream, candidates, graph, ranks) = sentence_pipeline_artifacts(&tokens, &cfg);
 
-        let phrases = SentencePhraseBuilder.build(
-            stream.as_ref(),
-            candidates.as_ref(),
-            &ranks,
-            &graph,
-            &cfg,
-        );
+        let phrases =
+            SentencePhraseBuilder.build(stream.as_ref(), candidates.as_ref(), &ranks, &graph, &cfg);
 
         let formatter = SentenceFormatter::default(); // sort_by_position = false
         let result = formatter.format(&phrases, &ranks, None, &cfg);
@@ -8151,13 +8184,8 @@ mod tests {
         let cfg = TextRankConfig::default();
         let (stream, candidates, graph, ranks) = sentence_pipeline_artifacts(&tokens, &cfg);
 
-        let phrases = SentencePhraseBuilder.build(
-            stream.as_ref(),
-            candidates.as_ref(),
-            &ranks,
-            &graph,
-            &cfg,
-        );
+        let phrases =
+            SentencePhraseBuilder.build(stream.as_ref(), candidates.as_ref(), &ranks, &graph, &cfg);
 
         let formatter = SentenceFormatter::default().with_sort_by_position(true);
         let result = formatter.format(&phrases, &ranks, None, &cfg);

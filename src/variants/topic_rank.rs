@@ -514,7 +514,10 @@ mod tests {
         assert_eq!(neural.offsets.len(), 2);
 
         let ml = &result.phrases[1];
-        assert_eq!(ml.count, 2, "machine learning algorithm cluster has 2 members");
+        assert_eq!(
+            ml.count, 2,
+            "machine learning algorithm cluster has 2 members"
+        );
     }
 
     #[test]

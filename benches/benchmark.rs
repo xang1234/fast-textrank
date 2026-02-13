@@ -313,10 +313,7 @@ fn benchmark_pipeline_vs_direct(c: &mut Criterion) {
     // New pipeline-based path (current implementation)
     group.bench_function("pipeline", |b| {
         b.iter(|| {
-            phrase::extraction::extract_keyphrases_with_info(
-                black_box(&tokens),
-                black_box(&config),
-            )
+            phrase::extraction::extract_keyphrases_with_info(black_box(&tokens), black_box(&config))
         })
     });
 

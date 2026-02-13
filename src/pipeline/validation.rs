@@ -185,8 +185,10 @@ impl ValidationRule for RankTeleportRule {
     }
 
     fn validate(&self, spec: &PipelineSpecV1) -> Vec<ValidationDiagnostic> {
-        let is_personalized =
-            matches!(spec.modules.rank, Some(RankSpec::PersonalizedPagerank { .. }));
+        let is_personalized = matches!(
+            spec.modules.rank,
+            Some(RankSpec::PersonalizedPagerank { .. })
+        );
 
         if is_personalized && spec.modules.teleport.is_none() {
             vec![ValidationDiagnostic::error(
@@ -234,7 +236,10 @@ impl ValidationRule for TopicGraphDepsRule {
             ));
         }
 
-        if !matches!(spec.modules.candidates, Some(CandidatesSpec::PhraseCandidates)) {
+        if !matches!(
+            spec.modules.candidates,
+            Some(CandidatesSpec::PhraseCandidates)
+        ) {
             out.push(ValidationDiagnostic::error(
                 PipelineSpecError::new(
                     ErrorCode::InvalidCombo,
@@ -310,7 +315,9 @@ impl ValidationRule for RuntimeLimitsRule {
                         format!("/runtime/{field}"),
                         format!("{field} must be greater than 0"),
                     )
-                    .with_hint(format!("Remove {field} to disable the limit, or set it to a positive value")),
+                    .with_hint(format!(
+                        "Remove {field} to disable the limit, or set it to a positive value"
+                    )),
                 ));
             }
         }
@@ -591,20 +598,16 @@ mod tests {
             }"#,
         ));
         // alpha_boost doesn't require clustering (it's a weight modifier)
-        assert!(
-            !report
-                .errors()
-                .any(|e| e.message.contains("remove_intra_cluster"))
-        );
+        assert!(!report
+            .errors()
+            .any(|e| e.message.contains("remove_intra_cluster")));
     }
 
     // ─── Rule: runtime_limits ───────────────────────────────────────────
 
     #[test]
     fn test_zero_max_tokens_fails() {
-        let report = engine().validate(&spec(
-            r#"{ "v": 1, "runtime": { "max_tokens": 0 } }"#,
-        ));
+        let report = engine().validate(&spec(r#"{ "v": 1, "runtime": { "max_tokens": 0 } }"#));
         assert!(report.has_errors());
         let errs: Vec<_> = report.errors().collect();
         assert_eq!(errs.len(), 1);
@@ -631,9 +634,7 @@ mod tests {
 
     #[test]
     fn test_unknown_fields_non_strict_are_warnings() {
-        let report = engine().validate(&spec(
-            r#"{ "v": 1, "strict": false, "bogus": 42 }"#,
-        ));
+        let report = engine().validate(&spec(r#"{ "v": 1, "strict": false, "bogus": 42 }"#));
         assert!(report.is_valid()); // warnings don't make it invalid
         let warns: Vec<_> = report.warnings().collect();
         assert_eq!(warns.len(), 1);
@@ -643,9 +644,7 @@ mod tests {
 
     #[test]
     fn test_unknown_fields_strict_are_errors() {
-        let report = engine().validate(&spec(
-            r#"{ "v": 1, "strict": true, "bogus": 42 }"#,
-        ));
+        let report = engine().validate(&spec(r#"{ "v": 1, "strict": true, "bogus": 42 }"#));
         assert!(report.has_errors());
         let errs: Vec<_> = report.errors().collect();
         assert_eq!(errs.len(), 1);
@@ -692,9 +691,7 @@ mod tests {
 
     #[test]
     fn test_max_threads_zero_fails() {
-        let report = engine().validate(&spec(
-            r#"{ "v": 1, "runtime": { "max_threads": 0 } }"#,
-        ));
+        let report = engine().validate(&spec(r#"{ "v": 1, "runtime": { "max_threads": 0 } }"#));
         assert!(report.has_errors());
         let errs: Vec<_> = report.errors().collect();
         assert_eq!(errs.len(), 1);
@@ -794,9 +791,18 @@ mod tests {
         assert_eq!(err.path, "/modules/teleport");
         assert_eq!(err.code, ErrorCode::MissingStage);
         let hint = err.hint.as_deref().unwrap();
-        assert!(hint.contains("position"), "hint should mention position teleport: {hint}");
-        assert!(hint.contains("focus_terms"), "hint should mention focus_terms: {hint}");
-        assert!(hint.contains("uniform"), "hint should mention uniform: {hint}");
+        assert!(
+            hint.contains("position"),
+            "hint should mention position teleport: {hint}"
+        );
+        assert!(
+            hint.contains("focus_terms"),
+            "hint should mention focus_terms: {hint}"
+        );
+        assert!(
+            hint.contains("uniform"),
+            "hint should mention uniform: {hint}"
+        );
     }
 
     #[test]
@@ -814,7 +820,10 @@ mod tests {
         assert_eq!(err.path, "/modules/clustering");
         assert_eq!(err.code, ErrorCode::MissingStage);
         let hint = err.hint.as_deref().unwrap();
-        assert!(hint.contains("hac"), "hint should suggest hac clustering: {hint}");
+        assert!(
+            hint.contains("hac"),
+            "hint should suggest hac clustering: {hint}"
+        );
     }
 
     #[test]
@@ -868,9 +877,7 @@ mod tests {
 
     #[test]
     fn test_runtime_limit_hints_mention_removal() {
-        let report = engine().validate(&spec(
-            r#"{ "v": 1, "runtime": { "max_tokens": 0 } }"#,
-        ));
+        let report = engine().validate(&spec(r#"{ "v": 1, "runtime": { "max_tokens": 0 } }"#));
         let err = report.errors().next().unwrap();
         let hint = err.hint.as_deref().unwrap();
         assert!(
@@ -881,9 +888,7 @@ mod tests {
 
     #[test]
     fn test_unknown_field_path_includes_field_name() {
-        let report = engine().validate(&spec(
-            r#"{ "v": 1, "strict": true, "bogus_field": 42 }"#,
-        ));
+        let report = engine().validate(&spec(r#"{ "v": 1, "strict": true, "bogus_field": 42 }"#));
         let err = report.errors().next().unwrap();
         assert_eq!(err.path, "/bogus_field");
         assert_eq!(err.code, ErrorCode::UnknownField);
@@ -892,9 +897,7 @@ mod tests {
 
     #[test]
     fn test_unknown_field_hint_suggests_removal() {
-        let report = engine().validate(&spec(
-            r#"{ "v": 1, "strict": true, "typo": 1 }"#,
-        ));
+        let report = engine().validate(&spec(r#"{ "v": 1, "strict": true, "typo": 1 }"#));
         let err = report.errors().next().unwrap();
         let hint = err.hint.as_deref().unwrap();
         assert!(
@@ -1066,7 +1069,11 @@ mod tests {
             }
             fn validate(&self, spec: &PipelineSpecV1) -> Vec<ValidationDiagnostic> {
                 if let Some(rank) = &spec.modules.rank {
-                    if !self.available_rank_types.iter().any(|t| t == rank.type_name()) {
+                    if !self
+                        .available_rank_types
+                        .iter()
+                        .any(|t| t == rank.type_name())
+                    {
                         return vec![ValidationDiagnostic::error(
                             PipelineSpecError::new(
                                 ErrorCode::ModuleUnavailable,
@@ -1178,17 +1185,13 @@ mod tests {
 
     #[test]
     fn test_limit_exceeded_code_used() {
-        let report = engine().validate(&spec(
-            r#"{ "v": 1, "runtime": { "max_edges": 0 } }"#,
-        ));
+        let report = engine().validate(&spec(r#"{ "v": 1, "runtime": { "max_edges": 0 } }"#));
         assert!(report.errors().any(|e| e.code == ErrorCode::LimitExceeded));
     }
 
     #[test]
     fn test_unknown_field_code_used() {
-        let report = engine().validate(&spec(
-            r#"{ "v": 1, "strict": true, "nope": 1 }"#,
-        ));
+        let report = engine().validate(&spec(r#"{ "v": 1, "strict": true, "nope": 1 }"#));
         assert!(report.errors().any(|e| e.code == ErrorCode::UnknownField));
     }
 
@@ -1231,9 +1234,7 @@ mod tests {
 
     #[test]
     fn test_empty_modules_is_valid() {
-        let report = engine().validate(&spec(
-            r#"{ "v": 1, "modules": {} }"#,
-        ));
+        let report = engine().validate(&spec(r#"{ "v": 1, "modules": {} }"#));
         assert!(report.is_valid());
     }
 
@@ -1247,9 +1248,7 @@ mod tests {
 
     #[test]
     fn test_spec_with_preset_is_valid() {
-        let report = engine().validate(&spec(
-            r#"{ "v": 1, "preset": "textrank" }"#,
-        ));
+        let report = engine().validate(&spec(r#"{ "v": 1, "preset": "textrank" }"#));
         assert!(report.is_valid());
     }
 

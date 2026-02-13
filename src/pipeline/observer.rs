@@ -497,7 +497,10 @@ mod tests {
     fn test_noop_observer_compiles_and_runs() {
         let mut obs = NoopObserver;
         obs.on_stage_start(STAGE_PREPROCESS);
-        obs.on_stage_end(STAGE_PREPROCESS, &StageReport::new(Duration::from_millis(1)));
+        obs.on_stage_end(
+            STAGE_PREPROCESS,
+            &StageReport::new(Duration::from_millis(1)),
+        );
         // No panics, no side effects — that's the contract.
     }
 
@@ -548,8 +551,14 @@ mod tests {
     #[test]
     fn test_stage_timing_observer_total_duration() {
         let mut obs = StageTimingObserver::new();
-        obs.on_stage_end(STAGE_PREPROCESS, &StageReport::new(Duration::from_millis(1)));
-        obs.on_stage_end(STAGE_CANDIDATES, &StageReport::new(Duration::from_millis(2)));
+        obs.on_stage_end(
+            STAGE_PREPROCESS,
+            &StageReport::new(Duration::from_millis(1)),
+        );
+        obs.on_stage_end(
+            STAGE_CANDIDATES,
+            &StageReport::new(Duration::from_millis(2)),
+        );
         obs.on_stage_end(STAGE_GRAPH, &StageReport::new(Duration::from_millis(3)));
 
         assert_eq!(obs.total_duration(), Duration::from_millis(6));
@@ -591,7 +600,10 @@ mod tests {
         let mut obs = RecordingObserver::new();
 
         obs.on_stage_start(STAGE_CANDIDATES);
-        obs.on_stage_end(STAGE_CANDIDATES, &StageReport::new(Duration::from_millis(1)));
+        obs.on_stage_end(
+            STAGE_CANDIDATES,
+            &StageReport::new(Duration::from_millis(1)),
+        );
         obs.on_stage_start(STAGE_GRAPH);
         obs.on_stage_end(STAGE_GRAPH, &StageReport::new(Duration::from_millis(2)));
 
@@ -631,6 +643,10 @@ mod tests {
         let mut sorted = names.to_vec();
         sorted.sort();
         sorted.dedup();
-        assert_eq!(sorted.len(), names.len(), "Stage name constants must be unique");
+        assert_eq!(
+            sorted.len(),
+            names.len(),
+            "Stage name constants must be unique"
+        );
     }
 }

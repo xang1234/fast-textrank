@@ -10,10 +10,10 @@
 //! difference from the base algorithm is the teleport (personalization)
 //! strategy.
 
+use crate::phrase::extraction::ExtractionResult;
 use crate::pipeline::artifacts::TokenStream;
 use crate::pipeline::observer::NoopObserver;
 use crate::pipeline::runner::PositionRankPipeline;
-use crate::phrase::extraction::ExtractionResult;
 use crate::types::{Phrase, TextRankConfig, Token};
 
 /// PositionRank implementation

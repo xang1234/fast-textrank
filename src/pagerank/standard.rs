@@ -178,7 +178,12 @@ impl StandardPageRank {
             }
         }
 
-        PageRankResult::new(score_buf.clone(), iterations, delta, delta <= self.threshold)
+        PageRankResult::new(
+            score_buf.clone(),
+            iterations,
+            delta,
+            delta <= self.threshold,
+        )
     }
 
     /// Run PageRank with weighted edges
@@ -353,7 +358,11 @@ mod tests {
 
         assert_eq!(result_normal.iterations, result_reusing.iterations);
         assert_eq!(result_normal.converged, result_reusing.converged);
-        for (a, b) in result_normal.scores.iter().zip(result_reusing.scores.iter()) {
+        for (a, b) in result_normal
+            .scores
+            .iter()
+            .zip(result_reusing.scores.iter())
+        {
             assert!((a - b).abs() < 1e-12, "score mismatch: {a} vs {b}");
         }
     }

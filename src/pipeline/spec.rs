@@ -222,7 +222,9 @@ pub fn resolve_preset(name: &str) -> Result<ModuleSet, PipelineSpecError> {
         "topic_rank" | "topicrank" | "topic" => Ok(ModuleSet {
             candidates: Some(CandidatesSpec::PhraseCandidates),
             graph: Some(GraphSpec::TopicGraph),
-            clustering: Some(ClusteringSpec::Hac { threshold: Some(0.25) }),
+            clustering: Some(ClusteringSpec::Hac {
+                threshold: Some(0.25),
+            }),
             ..Default::default()
         }),
 
@@ -242,9 +244,13 @@ pub fn resolve_preset(name: &str) -> Result<ModuleSet, PipelineSpecError> {
         #[cfg(feature = "sentence-rank")]
         "sentence_rank" | "sentencerank" | "sentence" => Ok(ModuleSet {
             candidates: Some(CandidatesSpec::SentenceCandidates),
-            graph: Some(GraphSpec::SentenceGraph { min_similarity: None }),
+            graph: Some(GraphSpec::SentenceGraph {
+                min_similarity: None,
+            }),
             phrases: Some(PhraseSpec::SentencePhrases),
-            format: Some(FormatSpec::SentenceJson { sort_by_position: None }),
+            format: Some(FormatSpec::SentenceJson {
+                sort_by_position: None,
+            }),
             ..Default::default()
         }),
 
@@ -458,7 +464,11 @@ impl GraphSpec {
     pub fn merge_with(&self, fallback: &Self) -> Self {
         match (self, fallback) {
             (
-                Self::CooccurrenceWindow { window_size, cross_sentence, edge_weighting },
+                Self::CooccurrenceWindow {
+                    window_size,
+                    cross_sentence,
+                    edge_weighting,
+                },
                 Self::CooccurrenceWindow {
                     window_size: fb_ws,
                     cross_sentence: fb_cs,
@@ -472,7 +482,9 @@ impl GraphSpec {
             #[cfg(feature = "sentence-rank")]
             (
                 Self::SentenceGraph { min_similarity },
-                Self::SentenceGraph { min_similarity: fb_ms },
+                Self::SentenceGraph {
+                    min_similarity: fb_ms,
+                },
             ) => Self::SentenceGraph {
                 min_similarity: min_similarity.or(*fb_ms),
             },
@@ -609,7 +621,11 @@ impl RankSpec {
     pub fn merge_with(&self, fallback: &Self) -> Self {
         match (self, fallback) {
             (
-                Self::PersonalizedPagerank { damping, max_iterations, convergence_threshold },
+                Self::PersonalizedPagerank {
+                    damping,
+                    max_iterations,
+                    convergence_threshold,
+                },
                 Self::PersonalizedPagerank {
                     damping: fb_d,
                     max_iterations: fb_mi,
@@ -1012,8 +1028,14 @@ mod tests {
         }"#;
         let spec: PipelineSpecV1 = serde_json::from_str(json).unwrap();
         assert_eq!(spec.preset.as_deref(), Some("textrank"));
-        assert!(matches!(spec.modules.rank, Some(RankSpec::PersonalizedPagerank { .. })));
-        assert!(matches!(spec.modules.teleport, Some(TeleportSpec::Position { .. })));
+        assert!(matches!(
+            spec.modules.rank,
+            Some(RankSpec::PersonalizedPagerank { .. })
+        ));
+        assert!(matches!(
+            spec.modules.teleport,
+            Some(TeleportSpec::Position { .. })
+        ));
         assert_eq!(spec.runtime.max_tokens, Some(100000));
         assert!(spec.strict);
     }
@@ -1033,7 +1055,11 @@ mod tests {
         let spec: PipelineSpecV1 = serde_json::from_str(json).unwrap();
 
         match &spec.modules.graph {
-            Some(GraphSpec::CooccurrenceWindow { window_size, edge_weighting, .. }) => {
+            Some(GraphSpec::CooccurrenceWindow {
+                window_size,
+                edge_weighting,
+                ..
+            }) => {
                 assert_eq!(*window_size, Some(5));
                 assert_eq!(*edge_weighting, Some(EdgeWeightingSpec::Count));
             }
@@ -1041,7 +1067,11 @@ mod tests {
         }
 
         match &spec.modules.rank {
-            Some(RankSpec::PersonalizedPagerank { damping, max_iterations, .. }) => {
+            Some(RankSpec::PersonalizedPagerank {
+                damping,
+                max_iterations,
+                ..
+            }) => {
                 assert_eq!(*damping, Some(0.9));
                 assert_eq!(*max_iterations, Some(200));
             }
@@ -1063,7 +1093,11 @@ mod tests {
         }
 
         match &spec.modules.phrases {
-            Some(PhraseSpec::ChunkPhrases { min_phrase_length, score_aggregation, .. }) => {
+            Some(PhraseSpec::ChunkPhrases {
+                min_phrase_length,
+                score_aggregation,
+                ..
+            }) => {
                 assert_eq!(*min_phrase_length, Some(2));
                 assert_eq!(*score_aggregation, Some(ScoreAggregationSpec::Mean));
             }
@@ -1129,8 +1163,14 @@ mod tests {
             }
         }"#;
         let spec: PipelineSpecV1 = serde_json::from_str(json).unwrap();
-        assert!(matches!(spec.modules.preprocess, Some(PreprocessSpec::Default)));
-        assert!(matches!(spec.modules.format, Some(FormatSpec::StandardJson)));
+        assert!(matches!(
+            spec.modules.preprocess,
+            Some(PreprocessSpec::Default)
+        ));
+        assert!(matches!(
+            spec.modules.format,
+            Some(FormatSpec::StandardJson)
+        ));
     }
 
     // ─── RuntimeSpec threading ──────────────────────────────────────
@@ -1455,14 +1495,23 @@ mod tests {
     fn test_type_names() {
         assert_eq!(PreprocessSpec::Default.type_name(), "default");
         assert_eq!(CandidatesSpec::WordNodes.type_name(), "word_nodes");
-        assert_eq!(CandidatesSpec::PhraseCandidates.type_name(), "phrase_candidates");
+        assert_eq!(
+            CandidatesSpec::PhraseCandidates.type_name(),
+            "phrase_candidates"
+        );
         #[cfg(feature = "sentence-rank")]
-        assert_eq!(CandidatesSpec::SentenceCandidates.type_name(), "sentence_candidates");
+        assert_eq!(
+            CandidatesSpec::SentenceCandidates.type_name(),
+            "sentence_candidates"
+        );
         assert_eq!(GraphSpec::TopicGraph.type_name(), "topic_graph");
         assert_eq!(GraphSpec::CandidateGraph.type_name(), "candidate_graph");
         #[cfg(feature = "sentence-rank")]
         assert_eq!(
-            GraphSpec::SentenceGraph { min_similarity: None }.type_name(),
+            GraphSpec::SentenceGraph {
+                min_similarity: None
+            }
+            .type_name(),
             "sentence_graph"
         );
         assert_eq!(
@@ -1474,10 +1523,16 @@ mod tests {
             .type_name(),
             "cooccurrence_window"
         );
-        assert_eq!(GraphTransformSpec::RemoveIntraClusterEdges.type_name(), "remove_intra_cluster_edges");
+        assert_eq!(
+            GraphTransformSpec::RemoveIntraClusterEdges.type_name(),
+            "remove_intra_cluster_edges"
+        );
         assert_eq!(GraphTransformSpec::AlphaBoost.type_name(), "alpha_boost");
         assert_eq!(TeleportSpec::Uniform.type_name(), "uniform");
-        assert_eq!(TeleportSpec::Position { shape: None }.type_name(), "position");
+        assert_eq!(
+            TeleportSpec::Position { shape: None }.type_name(),
+            "position"
+        );
         assert_eq!(TeleportSpec::FocusTerms.type_name(), "focus_terms");
         assert_eq!(TeleportSpec::TopicWeights.type_name(), "topic_weights");
         assert_eq!(ClusteringSpec::Hac { threshold: None }.type_name(), "hac");
@@ -1510,7 +1565,10 @@ mod tests {
         );
         #[cfg(feature = "sentence-rank")]
         assert_eq!(
-            FormatSpec::SentenceJson { sort_by_position: None }.type_name(),
+            FormatSpec::SentenceJson {
+                sort_by_position: None
+            }
+            .type_name(),
             "sentence_json"
         );
     }
@@ -1523,9 +1581,9 @@ mod tests {
 
     #[test]
     fn test_standard_json_with_debug_serde() {
-        let spec: FormatSpec = serde_json::from_str(
-            r#"{"type": "standard_json_with_debug", "debug_key": "meta"}"#
-        ).unwrap();
+        let spec: FormatSpec =
+            serde_json::from_str(r#"{"type": "standard_json_with_debug", "debug_key": "meta"}"#)
+                .unwrap();
         match spec {
             FormatSpec::StandardJsonWithDebug { debug_key } => {
                 assert_eq!(debug_key.as_deref(), Some("meta"));
@@ -1536,9 +1594,8 @@ mod tests {
 
     #[test]
     fn test_standard_json_with_debug_no_key() {
-        let spec: FormatSpec = serde_json::from_str(
-            r#"{"type": "standard_json_with_debug"}"#
-        ).unwrap();
+        let spec: FormatSpec =
+            serde_json::from_str(r#"{"type": "standard_json_with_debug"}"#).unwrap();
         match spec {
             FormatSpec::StandardJsonWithDebug { debug_key } => {
                 assert!(debug_key.is_none());
@@ -1612,7 +1669,10 @@ mod tests {
     #[test]
     fn test_resolve_preset_topic_rank() {
         let ms = resolve_preset("topic_rank").unwrap();
-        assert!(matches!(ms.candidates, Some(CandidatesSpec::PhraseCandidates)));
+        assert!(matches!(
+            ms.candidates,
+            Some(CandidatesSpec::PhraseCandidates)
+        ));
         assert!(matches!(ms.graph, Some(GraphSpec::TopicGraph)));
         match &ms.clustering {
             Some(ClusteringSpec::Hac { threshold }) => {
@@ -1627,13 +1687,25 @@ mod tests {
     #[test]
     fn test_resolve_preset_multipartite_rank() {
         let ms = resolve_preset("multipartite_rank").unwrap();
-        assert!(matches!(ms.candidates, Some(CandidatesSpec::PhraseCandidates)));
+        assert!(matches!(
+            ms.candidates,
+            Some(CandidatesSpec::PhraseCandidates)
+        ));
         assert!(matches!(ms.graph, Some(GraphSpec::CandidateGraph)));
         assert!(ms.teleport.is_none());
-        assert!(matches!(ms.clustering, Some(ClusteringSpec::Hac { threshold: None })));
+        assert!(matches!(
+            ms.clustering,
+            Some(ClusteringSpec::Hac { threshold: None })
+        ));
         assert_eq!(ms.graph_transforms.len(), 2);
-        assert!(matches!(ms.graph_transforms[0], GraphTransformSpec::RemoveIntraClusterEdges));
-        assert!(matches!(ms.graph_transforms[1], GraphTransformSpec::AlphaBoost));
+        assert!(matches!(
+            ms.graph_transforms[0],
+            GraphTransformSpec::RemoveIntraClusterEdges
+        ));
+        assert!(matches!(
+            ms.graph_transforms[1],
+            GraphTransformSpec::AlphaBoost
+        ));
     }
 
     #[test]
@@ -1726,7 +1798,10 @@ mod tests {
                 assert!(ms.phrases.is_none(), "preset '{name}' set phrases");
                 assert!(ms.format.is_none(), "preset '{name}' set format");
             }
-            assert!(ms.unknown_fields.is_empty(), "preset '{name}' has unknown fields");
+            assert!(
+                ms.unknown_fields.is_empty(),
+                "preset '{name}' has unknown fields"
+            );
         }
     }
 
@@ -1748,8 +1823,14 @@ mod tests {
             ..Default::default()
         };
         let merged = merge_modules(&user, &preset);
-        assert!(matches!(merged.teleport, Some(TeleportSpec::Position { .. })));
-        assert!(matches!(merged.graph, Some(GraphSpec::CooccurrenceWindow { .. })));
+        assert!(matches!(
+            merged.teleport,
+            Some(TeleportSpec::Position { .. })
+        ));
+        assert!(matches!(
+            merged.graph,
+            Some(GraphSpec::CooccurrenceWindow { .. })
+        ));
     }
 
     #[test]
@@ -1878,7 +1959,10 @@ mod tests {
         };
         let merged = merge_modules(&user, &preset);
         assert_eq!(merged.graph_transforms.len(), 1);
-        assert!(matches!(merged.graph_transforms[0], GraphTransformSpec::AlphaBoost));
+        assert!(matches!(
+            merged.graph_transforms[0],
+            GraphTransformSpec::AlphaBoost
+        ));
     }
 
     #[test]
@@ -1931,11 +2015,15 @@ mod tests {
     #[test]
     fn test_merge_clustering_deep_params() {
         let user = ModuleSet {
-            clustering: Some(ClusteringSpec::Hac { threshold: Some(0.3) }),
+            clustering: Some(ClusteringSpec::Hac {
+                threshold: Some(0.3),
+            }),
             ..Default::default()
         };
         let preset = ModuleSet {
-            clustering: Some(ClusteringSpec::Hac { threshold: Some(0.25) }),
+            clustering: Some(ClusteringSpec::Hac {
+                threshold: Some(0.25),
+            }),
             ..Default::default()
         };
         let merged = merge_modules(&user, &preset);
@@ -1954,7 +2042,9 @@ mod tests {
             ..Default::default()
         };
         let preset = ModuleSet {
-            clustering: Some(ClusteringSpec::Hac { threshold: Some(0.25) }),
+            clustering: Some(ClusteringSpec::Hac {
+                threshold: Some(0.25),
+            }),
             ..Default::default()
         };
         let merged = merge_modules(&user, &preset);
@@ -2073,7 +2163,10 @@ mod tests {
         let v1 = resolve_spec(&spec).unwrap();
         assert_eq!(v1.v, 1);
         assert_eq!(v1.preset.as_deref(), Some("position_rank"));
-        assert!(matches!(v1.modules.teleport, Some(TeleportSpec::Position { .. })));
+        assert!(matches!(
+            v1.modules.teleport,
+            Some(TeleportSpec::Position { .. })
+        ));
         assert!(v1.modules.graph.is_none());
     }
 
@@ -2095,7 +2188,10 @@ mod tests {
         });
         let v1 = resolve_spec(&spec).unwrap();
         // Teleport comes from user override
-        assert!(matches!(v1.modules.teleport, Some(TeleportSpec::Position { .. })));
+        assert!(matches!(
+            v1.modules.teleport,
+            Some(TeleportSpec::Position { .. })
+        ));
         // Graph comes from preset (single_rank → cross-sentence)
         match &v1.modules.graph {
             Some(GraphSpec::CooccurrenceWindow { cross_sentence, .. }) => {
@@ -2122,7 +2218,10 @@ mod tests {
         let spec = PipelineSpec::V1(original.clone());
         let v1 = resolve_spec(&spec).unwrap();
         assert!(v1.preset.is_none());
-        assert!(matches!(v1.modules.teleport, Some(TeleportSpec::FocusTerms)));
+        assert!(matches!(
+            v1.modules.teleport,
+            Some(TeleportSpec::FocusTerms)
+        ));
         assert!(v1.strict);
     }
 
@@ -2197,7 +2296,11 @@ mod tests {
         });
         let v1 = resolve_spec(&spec).unwrap();
         match &v1.modules.graph {
-            Some(GraphSpec::CooccurrenceWindow { window_size, cross_sentence, .. }) => {
+            Some(GraphSpec::CooccurrenceWindow {
+                window_size,
+                cross_sentence,
+                ..
+            }) => {
                 assert_eq!(*window_size, Some(5)); // from user
                 assert_eq!(*cross_sentence, Some(true)); // from preset
             }
@@ -2211,10 +2314,23 @@ mod tests {
     #[test]
     fn test_resolve_preset_sentence_rank() {
         let ms = resolve_preset("sentence_rank").unwrap();
-        assert!(matches!(ms.candidates, Some(CandidatesSpec::SentenceCandidates)));
-        assert!(matches!(ms.graph, Some(GraphSpec::SentenceGraph { min_similarity: None })));
+        assert!(matches!(
+            ms.candidates,
+            Some(CandidatesSpec::SentenceCandidates)
+        ));
+        assert!(matches!(
+            ms.graph,
+            Some(GraphSpec::SentenceGraph {
+                min_similarity: None
+            })
+        ));
         assert!(matches!(ms.phrases, Some(PhraseSpec::SentencePhrases)));
-        assert!(matches!(ms.format, Some(FormatSpec::SentenceJson { sort_by_position: None })));
+        assert!(matches!(
+            ms.format,
+            Some(FormatSpec::SentenceJson {
+                sort_by_position: None
+            })
+        ));
         // Not set by sentence_rank
         assert!(ms.teleport.is_none());
         assert!(ms.clustering.is_none());

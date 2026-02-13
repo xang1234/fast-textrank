@@ -11,10 +11,14 @@ use crate::pipeline::errors::PipelineRuntimeError;
 use crate::pipeline::observer::{NoopObserver, StageTimingObserver};
 #[cfg(feature = "sentence-rank")]
 use crate::pipeline::runner::SentenceRankPipeline;
-use crate::pipeline::spec::{resolve_spec, FormatSpec, PipelineSpec, PipelineSpecV1, VALID_PRESETS};
+use crate::pipeline::spec::{
+    resolve_spec, FormatSpec, PipelineSpec, PipelineSpecV1, VALID_PRESETS,
+};
 use crate::pipeline::spec_builder::SpecPipelineBuilder;
 use crate::pipeline::validation::{ValidationDiagnostic, ValidationEngine, ValidationReport};
-use crate::types::{DeterminismMode, PhraseGrouping, PosTag, ScoreAggregation, TextRankConfig, Token};
+use crate::types::{
+    DeterminismMode, PhraseGrouping, PosTag, ScoreAggregation, TextRankConfig, Token,
+};
 use crate::variants::biased_textrank::BiasedTextRank;
 use crate::variants::multipartite_rank::MultipartiteRank;
 use crate::variants::position_rank::PositionRank;
@@ -64,9 +68,7 @@ fn serialize_doc_error(err: &DocError) -> String {
             });
             serde_json::to_string(&obj).unwrap()
         }
-        DocError::Other(s) => {
-            serde_json::to_string(&serde_json::json!({ "error": s })).unwrap()
-        }
+        DocError::Other(s) => serde_json::to_string(&serde_json::json!({ "error": s })).unwrap(),
     }
 }
 
@@ -354,8 +356,7 @@ fn extract_with_variant(
         Variant::SentenceRank => {
             let stream = TokenStream::from_tokens(tokens);
             let mut obs = NoopObserver;
-            let formatted = SentenceRankPipeline::sentence_rank()
-                .run(stream, config, &mut obs);
+            let formatted = SentenceRankPipeline::sentence_rank().run(stream, config, &mut obs);
             crate::phrase::extraction::ExtractionResult {
                 phrases: formatted.phrases,
                 converged: formatted.converged,
@@ -420,15 +421,33 @@ pub fn build_capabilities() -> CapabilitiesResponse {
     candidates.push("sentence_candidates".into());
     modules.insert("candidates".into(), candidates);
 
-    let mut graph = vec!["cooccurrence_window".into(), "topic_graph".into(), "candidate_graph".into()];
+    let mut graph = vec![
+        "cooccurrence_window".into(),
+        "topic_graph".into(),
+        "candidate_graph".into(),
+    ];
     #[cfg(feature = "sentence-rank")]
     graph.push("sentence_graph".into());
     modules.insert("graph".into(), graph);
 
-    modules.insert("graph_transforms".into(), vec!["remove_intra_cluster_edges".into(), "alpha_boost".into()]);
-    modules.insert("teleport".into(), vec!["uniform".into(), "position".into(), "focus_terms".into(), "topic_weights".into()]);
+    modules.insert(
+        "graph_transforms".into(),
+        vec!["remove_intra_cluster_edges".into(), "alpha_boost".into()],
+    );
+    modules.insert(
+        "teleport".into(),
+        vec![
+            "uniform".into(),
+            "position".into(),
+            "focus_terms".into(),
+            "topic_weights".into(),
+        ],
+    );
     modules.insert("clustering".into(), vec!["hac".into()]);
-    modules.insert("rank".into(), vec!["standard_pagerank".into(), "personalized_pagerank".into()]);
+    modules.insert(
+        "rank".into(),
+        vec!["standard_pagerank".into(), "personalized_pagerank".into()],
+    );
 
     let mut phrases = vec!["chunk_phrases".into()];
     #[cfg(feature = "sentence-rank")]
@@ -484,7 +503,10 @@ fn attach_stage_timings(
 }
 
 /// Serialize a `JsonResult` respecting the `FormatSpec` (e.g., custom debug key).
-fn serialize_result_with_format(result: &JsonResult, format: Option<&FormatSpec>) -> Result<String, DocError> {
+fn serialize_result_with_format(
+    result: &JsonResult,
+    format: Option<&FormatSpec>,
+) -> Result<String, DocError> {
     match format {
         Some(FormatSpec::StandardJsonWithDebug { debug_key }) => {
             let key = debug_key.as_deref().unwrap_or("debug");
@@ -492,9 +514,13 @@ fn serialize_result_with_format(result: &JsonResult, format: Option<&FormatSpec>
                 // No renaming needed
                 return serde_json::to_string(result).map_err(|e| DocError::Other(e.to_string()));
             }
-            let mut value = serde_json::to_value(result).map_err(|e| DocError::Other(e.to_string()))?;
+            let mut value =
+                serde_json::to_value(result).map_err(|e| DocError::Other(e.to_string()))?;
             if let Some(debug) = value.as_object_mut().and_then(|m| m.remove("debug")) {
-                value.as_object_mut().unwrap().insert(key.to_string(), debug);
+                value
+                    .as_object_mut()
+                    .unwrap()
+                    .insert(key.to_string(), debug);
             }
             serde_json::to_string(&value).map_err(|e| DocError::Other(e.to_string()))
         }
@@ -585,10 +611,7 @@ fn run_pipeline_from_spec(
         .build(&resolved, config)
         .map_err(|e| DocError::Other(e.to_string()))?;
 
-    let use_timings = resolved
-        .expose
-        .as_ref()
-        .map_or(false, |e| e.stage_timings);
+    let use_timings = resolved.expose.as_ref().map_or(false, |e| e.stage_timings);
     let format_spec = resolved.modules.format.as_ref();
 
     // 5+6. Run pipeline (conditional observer + scoped threading)
@@ -627,9 +650,7 @@ fn run_pipeline_from_spec(
 }
 
 /// Convert an `ExtractionResult` (from legacy variant dispatch) into a `JsonResult`.
-fn extraction_to_json_result(
-    result: crate::phrase::extraction::ExtractionResult,
-) -> JsonResult {
+fn extraction_to_json_result(result: crate::phrase::extraction::ExtractionResult) -> JsonResult {
     JsonResult {
         phrases: result
             .phrases
@@ -649,9 +670,7 @@ fn extraction_to_json_result(
 }
 
 /// Convert a `FormattedResult` (from modular pipeline) into a `JsonResult`.
-fn formatted_to_json_result(
-    result: crate::pipeline::artifacts::FormattedResult,
-) -> JsonResult {
+fn formatted_to_json_result(result: crate::pipeline::artifacts::FormattedResult) -> JsonResult {
     JsonResult {
         phrases: result
             .phrases
@@ -685,9 +704,9 @@ fn process_single_doc(doc: JsonDocument) -> Result<String, DocError> {
 
     // Validate-only mode (fast path, no extraction)
     if doc.validate_only {
-        let pipeline_spec = doc
-            .pipeline
-            .ok_or_else(|| DocError::Other("validate_only requires a 'pipeline' field".to_string()))?;
+        let pipeline_spec = doc.pipeline.ok_or_else(|| {
+            DocError::Other("validate_only requires a 'pipeline' field".to_string())
+        })?;
         let response = match resolve_spec(&pipeline_spec) {
             Ok(resolved) => validate_spec_impl(&resolved),
             Err(err) => ValidationResponse {
@@ -751,9 +770,9 @@ fn process_single_doc_with_workspace(
 
     // Validate-only mode (fast path, no extraction)
     if doc.validate_only {
-        let pipeline_spec = doc
-            .pipeline
-            .ok_or_else(|| DocError::Other("validate_only requires a 'pipeline' field".to_string()))?;
+        let pipeline_spec = doc.pipeline.ok_or_else(|| {
+            DocError::Other("validate_only requires a 'pipeline' field".to_string())
+        })?;
         let response = match resolve_spec(&pipeline_spec) {
             Ok(resolved) => validate_spec_impl(&resolved),
             Err(err) => ValidationResponse {
@@ -851,9 +870,7 @@ pub fn extract_jsonl_from_json(py: Python<'_>, jsonl_input: &str) -> PyResult<St
                     Ok(json) => json,
                     Err(e) => serialize_doc_error(&e),
                 },
-                Err(e) => {
-                    serialize_doc_error(&DocError::Other(format!("Invalid JSON: {e}")))
-                }
+                Err(e) => serialize_doc_error(&DocError::Other(format!("Invalid JSON: {e}"))),
             };
             if !output.is_empty() {
                 output.push('\n');
@@ -1006,13 +1023,15 @@ mod tests {
 
     #[test]
     fn test_validate_spec_impl_valid() {
-        let spec: PipelineSpecV1 = serde_json::from_str(r#"{
+        let spec: PipelineSpecV1 = serde_json::from_str(
+            r#"{
             "v": 1,
             "modules": {
                 "rank": { "type": "personalized_pagerank" },
                 "teleport": { "type": "position" }
             }
-        }"#)
+        }"#,
+        )
         .unwrap();
         let resp = validate_spec_impl(&spec);
         assert!(resp.valid);
@@ -1021,10 +1040,12 @@ mod tests {
 
     #[test]
     fn test_validate_spec_impl_invalid() {
-        let spec: PipelineSpecV1 = serde_json::from_str(r#"{
+        let spec: PipelineSpecV1 = serde_json::from_str(
+            r#"{
             "v": 1,
             "modules": { "rank": { "type": "personalized_pagerank" } }
-        }"#)
+        }"#,
+        )
         .unwrap();
         let resp = validate_spec_impl(&spec);
         assert!(!resp.valid);
@@ -1033,10 +1054,12 @@ mod tests {
 
     #[test]
     fn test_validate_spec_impl_response_json_shape() {
-        let spec: PipelineSpecV1 = serde_json::from_str(r#"{
+        let spec: PipelineSpecV1 = serde_json::from_str(
+            r#"{
             "v": 1,
             "modules": { "rank": { "type": "personalized_pagerank" } }
-        }"#)
+        }"#,
+        )
         .unwrap();
         let resp = validate_spec_impl(&spec);
         let json = serde_json::to_value(&resp).unwrap();
@@ -1054,10 +1077,12 @@ mod tests {
     #[test]
     fn test_validate_only_document_no_tokens_needed() {
         // validate_only documents should not require tokens
-        let doc: JsonDocument = serde_json::from_str(r#"{
+        let doc: JsonDocument = serde_json::from_str(
+            r#"{
             "validate_only": true,
             "pipeline": { "v": 1, "modules": { "rank": { "type": "standard_pagerank" } } }
-        }"#)
+        }"#,
+        )
         .unwrap();
         assert!(doc.validate_only);
         assert!(doc.tokens.is_empty());
@@ -1066,11 +1091,13 @@ mod tests {
 
     #[test]
     fn test_validate_only_with_warnings() {
-        let spec: PipelineSpecV1 = serde_json::from_str(r#"{
+        let spec: PipelineSpecV1 = serde_json::from_str(
+            r#"{
             "v": 1,
             "strict": false,
             "bogus_field": 42
-        }"#)
+        }"#,
+        )
         .unwrap();
         let resp = validate_spec_impl(&spec);
         assert!(resp.valid); // warnings don't invalidate
@@ -1118,20 +1145,27 @@ mod tests {
     #[test]
     fn test_validate_spec_impl_multiple_errors_all_returned() {
         // personalized without teleport + topic_graph missing clustering
-        let spec: PipelineSpecV1 = serde_json::from_str(r#"{
+        let spec: PipelineSpecV1 = serde_json::from_str(
+            r#"{
             "v": 1,
             "modules": {
                 "rank": { "type": "personalized_pagerank" },
                 "graph": { "type": "topic_graph" }
             }
-        }"#).unwrap();
+        }"#,
+        )
+        .unwrap();
         let resp = validate_spec_impl(&spec);
         assert!(!resp.valid);
 
         let json = serde_json::to_value(&resp).unwrap();
         let diags = json["diagnostics"].as_array().unwrap();
         // At least 3: teleport missing, clustering missing, candidates wrong
-        assert!(diags.len() >= 3, "expected >=3 diagnostics, got {}", diags.len());
+        assert!(
+            diags.len() >= 3,
+            "expected >=3 diagnostics, got {}",
+            diags.len()
+        );
 
         // All should be errors
         for d in diags {
@@ -1141,11 +1175,14 @@ mod tests {
 
     #[test]
     fn test_validate_spec_impl_strict_unknown_in_response() {
-        let spec: PipelineSpecV1 = serde_json::from_str(r#"{
+        let spec: PipelineSpecV1 = serde_json::from_str(
+            r#"{
             "v": 1,
             "strict": true,
             "bogus_field": 42
-        }"#).unwrap();
+        }"#,
+        )
+        .unwrap();
         let resp = validate_spec_impl(&spec);
         assert!(!resp.valid);
 
@@ -1159,10 +1196,13 @@ mod tests {
     fn test_validate_only_document_with_preset_pipeline_spec() {
         // A string pipeline value parses as PipelineSpec::Preset
         // and resolves + validates successfully
-        let doc: JsonDocument = serde_json::from_str(r#"{
+        let doc: JsonDocument = serde_json::from_str(
+            r#"{
             "validate_only": true,
             "pipeline": "textrank"
-        }"#).unwrap();
+        }"#,
+        )
+        .unwrap();
         assert!(doc.validate_only);
         let spec = doc.pipeline.unwrap();
         assert!(spec.is_preset());
@@ -1176,9 +1216,12 @@ mod tests {
     #[test]
     fn test_validate_only_missing_pipeline_field() {
         // validate_only=true but no pipeline field
-        let doc: JsonDocument = serde_json::from_str(r#"{
+        let doc: JsonDocument = serde_json::from_str(
+            r#"{
             "validate_only": true
-        }"#).unwrap();
+        }"#,
+        )
+        .unwrap();
         assert!(doc.validate_only);
         assert!(doc.pipeline.is_none());
     }
@@ -1186,29 +1229,38 @@ mod tests {
     #[test]
     fn test_validate_response_json_has_valid_and_diagnostics() {
         // Verify the exact JSON shape of a successful validation
-        let spec: PipelineSpecV1 = serde_json::from_str(r#"{
+        let spec: PipelineSpecV1 = serde_json::from_str(
+            r#"{
             "v": 1,
             "modules": {
                 "rank": { "type": "personalized_pagerank" },
                 "teleport": { "type": "focus_terms" }
             }
-        }"#).unwrap();
+        }"#,
+        )
+        .unwrap();
         let resp = validate_spec_impl(&spec);
         let json = serde_json::to_value(&resp).unwrap();
 
         // Must have "valid" and "diagnostics" at top level
         assert!(json.get("valid").is_some(), "missing 'valid' key");
-        assert!(json.get("diagnostics").is_some(), "missing 'diagnostics' key");
+        assert!(
+            json.get("diagnostics").is_some(),
+            "missing 'diagnostics' key"
+        );
         assert_eq!(json["valid"], true);
         assert_eq!(json["diagnostics"].as_array().unwrap().len(), 0);
     }
 
     #[test]
     fn test_validate_response_diagnostic_has_all_fields() {
-        let spec: PipelineSpecV1 = serde_json::from_str(r#"{
+        let spec: PipelineSpecV1 = serde_json::from_str(
+            r#"{
             "v": 1,
             "modules": { "rank": { "type": "personalized_pagerank" } }
-        }"#).unwrap();
+        }"#,
+        )
+        .unwrap();
         let resp = validate_spec_impl(&spec);
         let json = serde_json::to_value(&resp).unwrap();
         let diag = &json["diagnostics"][0];
@@ -1532,7 +1584,10 @@ mod tests {
         let builder = SpecPipelineBuilder::new()
             .with_chunks(chunks)
             .with_focus_terms(json_config.focus_terms.clone(), json_config.bias_weight)
-            .with_topic_weights(json_config.topic_weights.clone(), json_config.topic_min_weight);
+            .with_topic_weights(
+                json_config.topic_weights.clone(),
+                json_config.topic_min_weight,
+            );
 
         let pipeline = builder.build_from_spec(&spec, &config).unwrap();
         let stream = crate::pipeline::artifacts::TokenStream::from_tokens(&tokens);
@@ -1732,7 +1787,10 @@ mod tests {
         let diags = json["diagnostics"].as_array().unwrap();
         assert_eq!(diags.len(), 1);
         assert_eq!(diags[0]["code"], "invalid_value");
-        assert!(diags[0]["message"].as_str().unwrap().contains("nonexistent"));
+        assert!(diags[0]["message"]
+            .as_str()
+            .unwrap()
+            .contains("nonexistent"));
     }
 
     #[test]
@@ -1767,7 +1825,10 @@ mod tests {
 
         // Must have all four top-level keys
         assert!(json.get("version").is_some(), "missing 'version'");
-        assert!(json.get("pipeline_spec_versions").is_some(), "missing 'pipeline_spec_versions'");
+        assert!(
+            json.get("pipeline_spec_versions").is_some(),
+            "missing 'pipeline_spec_versions'"
+        );
         assert!(json.get("presets").is_some(), "missing 'presets'");
         assert!(json.get("modules").is_some(), "missing 'modules'");
 
@@ -1781,8 +1842,15 @@ mod tests {
     fn test_capabilities_modules_has_all_stages() {
         let resp = build_capabilities();
         let expected_stages = [
-            "preprocess", "candidates", "graph", "graph_transforms",
-            "teleport", "clustering", "rank", "phrases", "format",
+            "preprocess",
+            "candidates",
+            "graph",
+            "graph_transforms",
+            "teleport",
+            "clustering",
+            "rank",
+            "phrases",
+            "format",
         ];
         assert_eq!(resp.modules.len(), expected_stages.len());
         for stage in &expected_stages {
@@ -1848,20 +1916,25 @@ mod tests {
                 );
             }
 
-            let pipeline = builder.build_from_spec(&spec, &config)
+            let pipeline = builder
+                .build_from_spec(&spec, &config)
                 .unwrap_or_else(|e| panic!("preset '{preset}' failed to build: {e}"));
             let stream = crate::pipeline::artifacts::TokenStream::from_tokens(&tokens);
             let mut obs = crate::pipeline::observer::NoopObserver;
             let result = pipeline.run(stream, &config, &mut obs);
 
             assert!(result.converged, "preset '{preset}' did not converge");
-            assert!(!result.phrases.is_empty(), "preset '{preset}' produced no phrases");
+            assert!(
+                !result.phrases.is_empty(),
+                "preset '{preset}' produced no phrases"
+            );
             // Scores should be sorted descending
             for w in result.phrases.windows(2) {
                 assert!(
                     w[0].score >= w[1].score,
                     "preset '{preset}' has unsorted scores: {} > {}",
-                    w[0].score, w[1].score
+                    w[0].score,
+                    w[1].score
                 );
             }
         }
@@ -1887,7 +1960,7 @@ mod tests {
     /// verify the round-trip produces identical results.
     #[test]
     fn test_spec_serialize_deserialize_build_run_roundtrip() {
-        use crate::pipeline::spec::{ModuleSet, RuntimeSpec, RankSpec, TeleportSpec, GraphSpec};
+        use crate::pipeline::spec::{GraphSpec, ModuleSet, RankSpec, RuntimeSpec, TeleportSpec};
 
         // Build a non-trivial V1 spec programmatically
         let original = PipelineSpecV1 {
@@ -1952,7 +2025,13 @@ mod tests {
         for (a, b) in result_a.phrases.iter().zip(&result_b.phrases) {
             assert_eq!(a.text, b.text);
             assert_eq!(a.lemma, b.lemma);
-            assert!((a.score - b.score).abs() < 1e-12, "scores differ for '{}': {} vs {}", a.text, a.score, b.score);
+            assert!(
+                (a.score - b.score).abs() < 1e-12,
+                "scores differ for '{}': {} vs {}",
+                a.text,
+                a.score,
+                b.score
+            );
             assert_eq!(a.rank, b.rank);
         }
     }
@@ -1960,7 +2039,7 @@ mod tests {
     /// Explicit module specs override preset defaults correctly.
     #[test]
     fn test_module_override_takes_precedence_over_preset() {
-        use crate::pipeline::spec::{ModuleSet, RuntimeSpec, GraphSpec};
+        use crate::pipeline::spec::{GraphSpec, ModuleSet, RuntimeSpec};
 
         // Start from single_rank preset (cross_sentence=true, no window_size)
         // Override with window_size=5
@@ -1985,7 +2064,11 @@ mod tests {
 
         // Verify deep merge: user's window_size=5 + preset's cross_sentence=true
         match &resolved.modules.graph {
-            Some(GraphSpec::CooccurrenceWindow { window_size, cross_sentence, .. }) => {
+            Some(GraphSpec::CooccurrenceWindow {
+                window_size,
+                cross_sentence,
+                ..
+            }) => {
                 assert_eq!(*window_size, Some(5), "user override lost");
                 assert_eq!(*cross_sentence, Some(true), "preset default lost");
             }
@@ -2068,10 +2151,8 @@ mod tests {
     /// `capabilities` flag takes priority over `validate_only` when both are set.
     #[test]
     fn test_capabilities_takes_priority_over_validate_only() {
-        let doc: JsonDocument = serde_json::from_str(
-            r#"{"capabilities": true, "validate_only": true}"#,
-        )
-        .unwrap();
+        let doc: JsonDocument =
+            serde_json::from_str(r#"{"capabilities": true, "validate_only": true}"#).unwrap();
         assert!(doc.capabilities);
         assert!(doc.validate_only);
         // In extract_from_json dispatch, capabilities is checked first
@@ -2138,26 +2219,38 @@ mod tests {
     #[test]
     fn test_invalid_spec_errors_through_validate_only() {
         // Case 1: personalized_pagerank without teleport
-        let spec: PipelineSpecV1 = serde_json::from_str(r#"{
+        let spec: PipelineSpecV1 = serde_json::from_str(
+            r#"{
             "v": 1,
             "modules": { "rank": { "type": "personalized_pagerank" } }
-        }"#).unwrap();
+        }"#,
+        )
+        .unwrap();
         let resp = validate_spec_impl(&spec);
         assert!(!resp.valid);
         let json = serde_json::to_value(&resp).unwrap();
         let diags = json["diagnostics"].as_array().unwrap();
-        assert!(diags.iter().any(|d| d["code"] == "missing_stage"), "expected missing_stage error");
+        assert!(
+            diags.iter().any(|d| d["code"] == "missing_stage"),
+            "expected missing_stage error"
+        );
 
         // Case 2: topic_graph without clustering or phrase_candidates
-        let spec: PipelineSpecV1 = serde_json::from_str(r#"{
+        let spec: PipelineSpecV1 = serde_json::from_str(
+            r#"{
             "v": 1,
             "modules": { "graph": { "type": "topic_graph" } }
-        }"#).unwrap();
+        }"#,
+        )
+        .unwrap();
         let resp = validate_spec_impl(&spec);
         assert!(!resp.valid);
         let json = serde_json::to_value(&resp).unwrap();
         let diags = json["diagnostics"].as_array().unwrap();
-        assert!(diags.len() >= 2, "expected multiple errors for topic_graph without deps");
+        assert!(
+            diags.len() >= 2,
+            "expected multiple errors for topic_graph without deps"
+        );
 
         // Case 3: unknown preset through the resolve path
         let spec = PipelineSpec::Preset("nonexistent".into());
@@ -2166,7 +2259,9 @@ mod tests {
             Err(err) => ValidationResponse {
                 valid: false,
                 report: crate::pipeline::validation::ValidationReport {
-                    diagnostics: vec![crate::pipeline::validation::ValidationDiagnostic::error(err)],
+                    diagnostics: vec![crate::pipeline::validation::ValidationDiagnostic::error(
+                        err,
+                    )],
                 },
             },
         };
@@ -2229,13 +2324,16 @@ mod tests {
         // Different window sizes → different graph edges → different scores
         let scores_a: Vec<f64> = r_small.phrases.iter().map(|p| p.score).collect();
         let scores_b: Vec<f64> = r_large.phrases.iter().map(|p| p.score).collect();
-        assert_ne!(scores_a, scores_b, "different window sizes should produce different scores");
+        assert_ne!(
+            scores_a, scores_b,
+            "different window sizes should produce different scores"
+        );
     }
 
     /// Pipeline-level module override trumps config-level defaults.
     #[test]
     fn test_pipeline_module_overrides_config_window_size() {
-        use crate::pipeline::spec::{ModuleSet, RuntimeSpec, GraphSpec};
+        use crate::pipeline::spec::{GraphSpec, ModuleSet, RuntimeSpec};
 
         // config.window_size = 3, but pipeline spec sets window_size = 6
         let json_input = format!(
@@ -2316,8 +2414,7 @@ mod tests {
     /// (JSONL requires no embedded newlines).
     fn jsonl_test_line() -> String {
         // Parse the pretty-printed tokens, re-serialize compact
-        let tokens: serde_json::Value =
-            serde_json::from_str(pipeline_test_tokens_json()).unwrap();
+        let tokens: serde_json::Value = serde_json::from_str(pipeline_test_tokens_json()).unwrap();
         let compact_tokens = serde_json::to_string(&tokens).unwrap();
         format!(
             r#"{{"tokens": {}, "config": {{"determinism": "deterministic"}}}}"#,
@@ -2328,10 +2425,8 @@ mod tests {
     #[test]
     fn test_jsonl_single_line() {
         let input = jsonl_test_line();
-        let output = process_single_doc(
-            serde_json::from_str::<JsonDocument>(&input).unwrap(),
-        )
-        .unwrap();
+        let output =
+            process_single_doc(serde_json::from_str::<JsonDocument>(&input).unwrap()).unwrap();
 
         // Should be a single JSON object with "phrases"
         let parsed: serde_json::Value = serde_json::from_str(&output).unwrap();
@@ -2352,12 +2447,8 @@ mod tests {
                 continue;
             }
             let result_line = match serde_json::from_str::<JsonDocument>(trimmed) {
-                Ok(doc) => process_single_doc(doc).unwrap_or_else(|e| {
-                    serialize_doc_error(&e)
-                }),
-                Err(e) => {
-                    serialize_doc_error(&DocError::Other(format!("Invalid JSON: {e}")))
-                }
+                Ok(doc) => process_single_doc(doc).unwrap_or_else(|e| serialize_doc_error(&e)),
+                Err(e) => serialize_doc_error(&DocError::Other(format!("Invalid JSON: {e}"))),
             };
             if !output.is_empty() {
                 output.push('\n');
@@ -2366,13 +2457,21 @@ mod tests {
         }
 
         let output_lines: Vec<&str> = output.lines().collect();
-        assert_eq!(output_lines.len(), 3, "expected 3 result lines, got {}", output_lines.len());
+        assert_eq!(
+            output_lines.len(),
+            3,
+            "expected 3 result lines, got {}",
+            output_lines.len()
+        );
 
         // Each line should parse as valid JSON with phrases
         for (i, ol) in output_lines.iter().enumerate() {
             let parsed: serde_json::Value = serde_json::from_str(ol)
                 .unwrap_or_else(|e| panic!("line {i} is not valid JSON: {e}"));
-            assert!(parsed.get("phrases").is_some(), "line {i} missing 'phrases'");
+            assert!(
+                parsed.get("phrases").is_some(),
+                "line {i} missing 'phrases'"
+            );
         }
     }
 
@@ -2389,12 +2488,8 @@ mod tests {
                 continue;
             }
             let result_line = match serde_json::from_str::<JsonDocument>(trimmed) {
-                Ok(doc) => process_single_doc(doc).unwrap_or_else(|e| {
-                    serialize_doc_error(&e)
-                }),
-                Err(e) => {
-                    serialize_doc_error(&DocError::Other(format!("Invalid JSON: {e}")))
-                }
+                Ok(doc) => process_single_doc(doc).unwrap_or_else(|e| serialize_doc_error(&e)),
+                Err(e) => serialize_doc_error(&DocError::Other(format!("Invalid JSON: {e}"))),
             };
             if !output.is_empty() {
                 output.push('\n');
@@ -2403,7 +2498,11 @@ mod tests {
         }
 
         let output_lines: Vec<&str> = output.lines().collect();
-        assert_eq!(output_lines.len(), 3, "expected 3 output lines (including error)");
+        assert_eq!(
+            output_lines.len(),
+            3,
+            "expected 3 output lines (including error)"
+        );
 
         // Line 0: good → phrases
         let l0: serde_json::Value = serde_json::from_str(output_lines[0]).unwrap();
@@ -2413,7 +2512,10 @@ mod tests {
         let l1: serde_json::Value = serde_json::from_str(output_lines[1]).unwrap();
         assert!(l1.get("error").is_some(), "line 1 should have error");
         let err_msg = l1["error"].as_str().unwrap();
-        assert!(err_msg.contains("Invalid JSON"), "error should mention Invalid JSON, got: {err_msg}");
+        assert!(
+            err_msg.contains("Invalid JSON"),
+            "error should mention Invalid JSON, got: {err_msg}"
+        );
 
         // Line 2: good → phrases
         let l2: serde_json::Value = serde_json::from_str(output_lines[2]).unwrap();
@@ -2433,12 +2535,8 @@ mod tests {
                 continue;
             }
             let result_line = match serde_json::from_str::<JsonDocument>(trimmed) {
-                Ok(doc) => process_single_doc(doc).unwrap_or_else(|e| {
-                    serialize_doc_error(&e)
-                }),
-                Err(e) => {
-                    serialize_doc_error(&DocError::Other(format!("Invalid JSON: {e}")))
-                }
+                Ok(doc) => process_single_doc(doc).unwrap_or_else(|e| serialize_doc_error(&e)),
+                Err(e) => serialize_doc_error(&DocError::Other(format!("Invalid JSON: {e}"))),
             };
             if !output.is_empty() {
                 output.push('\n');
@@ -2520,10 +2618,8 @@ mod tests {
             r#"{{"tokens": {}, "variant": "sentence_rank", "config": {{"determinism": "deterministic"}}}}"#,
             pipeline_test_tokens_json()
         );
-        let result = process_single_doc(
-            serde_json::from_str::<JsonDocument>(&json_input).unwrap(),
-        )
-        .unwrap();
+        let result =
+            process_single_doc(serde_json::from_str::<JsonDocument>(&json_input).unwrap()).unwrap();
         let parsed: serde_json::Value = serde_json::from_str(&result).unwrap();
         assert!(parsed.get("phrases").is_some());
         assert!(parsed.get("converged").is_some());
@@ -2536,10 +2632,8 @@ mod tests {
             r#"{{"tokens": {}, "pipeline": "sentence_rank", "config": {{"determinism": "deterministic"}}}}"#,
             pipeline_test_tokens_json()
         );
-        let result = process_single_doc(
-            serde_json::from_str::<JsonDocument>(&json_input).unwrap(),
-        )
-        .unwrap();
+        let result =
+            process_single_doc(serde_json::from_str::<JsonDocument>(&json_input).unwrap()).unwrap();
         let parsed: serde_json::Value = serde_json::from_str(&result).unwrap();
         assert!(parsed.get("phrases").is_some());
         assert!(parsed.get("converged").is_some());
@@ -2626,7 +2720,10 @@ mod tests {
         let parsed: serde_json::Value = serde_json::from_str(&result).unwrap();
         assert!(parsed.get("debug").is_some(), "debug key should be present");
         let debug = &parsed["debug"];
-        assert!(debug.get("graph_stats").is_some(), "graph_stats should be in debug");
+        assert!(
+            debug.get("graph_stats").is_some(),
+            "graph_stats should be in debug"
+        );
     }
 
     #[test]
@@ -2649,7 +2746,10 @@ mod tests {
         let parsed: serde_json::Value = serde_json::from_str(&result).unwrap();
         let debug = &parsed["debug"];
         let node_scores = debug["node_scores"].as_array().unwrap();
-        assert!(node_scores.len() <= 3, "node_scores should be capped at top_k=3");
+        assert!(
+            node_scores.len() <= 3,
+            "node_scores should be capped at top_k=3"
+        );
     }
 
     #[test]
@@ -2673,7 +2773,10 @@ mod tests {
         let parsed: serde_json::Value = serde_json::from_str(&result).unwrap();
         let debug = &parsed["debug"];
         let node_scores = debug["node_scores"].as_array().unwrap();
-        assert!(node_scores.len() <= 2, "node_scores should be clamped to max_debug_top_k=2");
+        assert!(
+            node_scores.len() <= 2,
+            "node_scores should be clamped to max_debug_top_k=2"
+        );
     }
 
     #[test]
@@ -2690,7 +2793,10 @@ mod tests {
         let doc: JsonDocument = serde_json::from_str(&json_input).unwrap();
         let result = process_single_doc(doc).unwrap();
         let parsed: serde_json::Value = serde_json::from_str(&result).unwrap();
-        assert!(parsed.get("debug").is_none(), "debug key should be absent without expose");
+        assert!(
+            parsed.get("debug").is_none(),
+            "debug key should be absent without expose"
+        );
     }
 
     // ─── Patch 4: stage_timings ──────────────────────────────────────
@@ -2713,7 +2819,10 @@ mod tests {
         let result = process_single_doc(doc).unwrap();
         let parsed: serde_json::Value = serde_json::from_str(&result).unwrap();
         let debug = &parsed["debug"];
-        assert!(debug.get("stage_timings").is_some(), "stage_timings should be present");
+        assert!(
+            debug.get("stage_timings").is_some(),
+            "stage_timings should be present"
+        );
         let timings = debug["stage_timings"].as_array().unwrap();
         assert!(!timings.is_empty(), "should have at least one timing entry");
     }
@@ -2768,8 +2877,14 @@ mod tests {
         let result = process_single_doc(doc).unwrap();
         let parsed: serde_json::Value = serde_json::from_str(&result).unwrap();
         // Debug should be under "introspection", not "debug"
-        assert!(parsed.get("debug").is_none(), "default 'debug' key should be absent");
-        assert!(parsed.get("introspection").is_some(), "custom key 'introspection' should be present");
+        assert!(
+            parsed.get("debug").is_none(),
+            "default 'debug' key should be absent"
+        );
+        assert!(
+            parsed.get("introspection").is_some(),
+            "custom key 'introspection' should be present"
+        );
     }
 
     #[test]
@@ -2791,7 +2906,10 @@ mod tests {
         let doc: JsonDocument = serde_json::from_str(&json_input).unwrap();
         let result = process_single_doc(doc).unwrap();
         let parsed: serde_json::Value = serde_json::from_str(&result).unwrap();
-        assert!(parsed.get("debug").is_some(), "'debug' key should be present with default");
+        assert!(
+            parsed.get("debug").is_some(),
+            "'debug' key should be present with default"
+        );
     }
 
     // ─── Patch 7: Runtime controls ───────────────────────────────────
@@ -2812,11 +2930,22 @@ mod tests {
         );
         let doc: JsonDocument = serde_json::from_str(&json_input).unwrap();
         let result = process_single_doc(doc);
-        assert!(result.is_err(), "should reject input with more tokens than max_tokens");
+        assert!(
+            result.is_err(),
+            "should reject input with more tokens than max_tokens"
+        );
         let err = result.unwrap_err();
         let msg = err.to_string();
-        assert!(msg.contains("token count"), "error should mention token count: {}", msg);
-        assert!(msg.contains("exceeds runtime limit"), "error should mention limit: {}", msg);
+        assert!(
+            msg.contains("token count"),
+            "error should mention token count: {}",
+            msg
+        );
+        assert!(
+            msg.contains("exceeds runtime limit"),
+            "error should mention limit: {}",
+            msg
+        );
     }
 
     #[test]
@@ -2838,7 +2967,10 @@ mod tests {
         let doc2: JsonDocument = serde_json::from_str(&json_input).unwrap();
         let result1 = process_single_doc(doc1).unwrap();
         let result2 = process_single_doc(doc2).unwrap();
-        assert_eq!(result1, result2, "deterministic runs should produce identical output");
+        assert_eq!(
+            result1, result2,
+            "deterministic runs should produce identical output"
+        );
     }
 
     #[test]
@@ -2861,7 +2993,11 @@ mod tests {
         assert!(result.is_err(), "should reject graph exceeding max_nodes");
         let err = result.unwrap_err();
         let msg = err.to_string();
-        assert!(msg.contains("node count"), "error should mention node count: {}", msg);
+        assert!(
+            msg.contains("node count"),
+            "error should mention node count: {}",
+            msg
+        );
     }
 
     #[test]
@@ -2884,7 +3020,11 @@ mod tests {
         assert!(result.is_err(), "should reject graph exceeding max_edges");
         let err = result.unwrap_err();
         let msg = err.to_string();
-        assert!(msg.contains("edge count"), "error should mention edge count: {}", msg);
+        assert!(
+            msg.contains("edge count"),
+            "error should mention edge count: {}",
+            msg
+        );
     }
 
     #[test]
@@ -2914,8 +3054,10 @@ mod tests {
     fn test_capabilities_includes_standard_json_with_debug() {
         let caps = build_capabilities();
         let format_list = caps.modules.get("format").unwrap();
-        assert!(format_list.contains(&"standard_json_with_debug".to_string()),
-            "capabilities should list standard_json_with_debug format");
+        assert!(
+            format_list.contains(&"standard_json_with_debug".to_string()),
+            "capabilities should list standard_json_with_debug format"
+        );
     }
 
     // ─── Workspace path also uses new wiring ─────────────────────────
@@ -2939,7 +3081,10 @@ mod tests {
         let mut ws = crate::pipeline::artifacts::PipelineWorkspace::new();
         let result = process_single_doc_with_workspace(doc, Some(&mut ws)).unwrap();
         let parsed: serde_json::Value = serde_json::from_str(&result).unwrap();
-        assert!(parsed.get("debug").is_some(), "workspace path should also produce debug output");
+        assert!(
+            parsed.get("debug").is_some(),
+            "workspace path should also produce debug output"
+        );
     }
 
     // ─── Structured errors (Issue 3) ────────────────────────────────
@@ -3026,10 +3171,15 @@ mod tests {
         assert_eq!(error_obj["code"], "limit_exceeded");
         assert_eq!(error_obj["stage"], "preprocess");
         assert_eq!(error_obj["path"], "/runtime/max_tokens");
-        assert!(error_obj["message"].as_str().unwrap().contains("token count"));
+        assert!(error_obj["message"]
+            .as_str()
+            .unwrap()
+            .contains("token count"));
 
         // error_message should be a flat string for backward compat
-        let error_message = parsed.get("error_message").expect("should have 'error_message'");
+        let error_message = parsed
+            .get("error_message")
+            .expect("should have 'error_message'");
         assert!(error_message.is_string());
     }
 
@@ -3041,9 +3191,15 @@ mod tests {
         let parsed: serde_json::Value = serde_json::from_str(&serialized).unwrap();
 
         let error_val = parsed.get("error").expect("should have 'error' key");
-        assert!(error_val.is_string(), "legacy error should be a plain string");
+        assert!(
+            error_val.is_string(),
+            "legacy error should be a plain string"
+        );
         assert_eq!(error_val.as_str().unwrap(), "something went wrong");
-        assert!(parsed.get("error_message").is_none(), "legacy error should not have error_message");
+        assert!(
+            parsed.get("error_message").is_none(),
+            "legacy error should not have error_message"
+        );
     }
 
     // ─── Batch parity (Issue 4) ─────────────────────────────────────
@@ -3064,7 +3220,9 @@ mod tests {
         let mut ws = PipelineWorkspace::new();
         let mut output = String::from("[");
         for (i, doc) in docs.into_iter().enumerate() {
-            if i > 0 { output.push(','); }
+            if i > 0 {
+                output.push(',');
+            }
             match process_single_doc_with_workspace(doc, Some(&mut ws)) {
                 Ok(json) => output.push_str(&json),
                 Err(e) => output.push_str(&serialize_doc_error(&e)),
@@ -3075,7 +3233,10 @@ mod tests {
         let arr = parsed.as_array().unwrap();
         assert_eq!(arr.len(), 2);
         for item in arr {
-            assert!(item["phrases"].as_array().unwrap().len() > 0, "each doc should have phrases");
+            assert!(
+                item["phrases"].as_array().unwrap().len() > 0,
+                "each doc should have phrases"
+            );
         }
     }
 
@@ -3102,7 +3263,9 @@ mod tests {
         let mut ws = PipelineWorkspace::new();
         let mut output = String::from("[");
         for (i, doc) in docs.into_iter().enumerate() {
-            if i > 0 { output.push(','); }
+            if i > 0 {
+                output.push(',');
+            }
             match process_single_doc_with_workspace(doc, Some(&mut ws)) {
                 Ok(json) => output.push_str(&json),
                 Err(e) => output.push_str(&serialize_doc_error(&e)),
@@ -3137,7 +3300,9 @@ mod tests {
         let mut ws = PipelineWorkspace::new();
         let mut output = String::from("[");
         for (i, doc) in docs.into_iter().enumerate() {
-            if i > 0 { output.push(','); }
+            if i > 0 {
+                output.push(',');
+            }
             match process_single_doc_with_workspace(doc, Some(&mut ws)) {
                 Ok(json) => output.push_str(&json),
                 Err(e) => output.push_str(&serialize_doc_error(&e)),
@@ -3146,7 +3311,10 @@ mod tests {
         output.push(']');
         let parsed: serde_json::Value = serde_json::from_str(&output).unwrap();
         let item = &parsed.as_array().unwrap()[0];
-        assert!(item.get("debug").is_some(), "batch pipeline doc with expose should have debug");
+        assert!(
+            item.get("debug").is_some(),
+            "batch pipeline doc with expose should have debug"
+        );
     }
 
     #[test]
@@ -3177,7 +3345,9 @@ mod tests {
         let mut ws = PipelineWorkspace::new();
         let mut output = String::from("[");
         for (i, doc) in docs.into_iter().enumerate() {
-            if i > 0 { output.push(','); }
+            if i > 0 {
+                output.push(',');
+            }
             match process_single_doc_with_workspace(doc, Some(&mut ws)) {
                 Ok(json) => output.push_str(&json),
                 Err(e) => output.push_str(&serialize_doc_error(&e)),
@@ -3218,7 +3388,9 @@ mod tests {
         let mut output = String::new();
         for raw_line in input.lines() {
             let trimmed = raw_line.trim();
-            if trimmed.is_empty() { continue; }
+            if trimmed.is_empty() {
+                continue;
+            }
             let result_line = match serde_json::from_str::<JsonDocument>(trimmed) {
                 Ok(doc) => match process_single_doc_with_workspace(doc, Some(&mut ws)) {
                     Ok(json) => json,
@@ -3226,7 +3398,9 @@ mod tests {
                 },
                 Err(e) => serialize_doc_error(&DocError::Other(format!("Invalid JSON: {e}"))),
             };
-            if !output.is_empty() { output.push('\n'); }
+            if !output.is_empty() {
+                output.push('\n');
+            }
             output.push_str(&result_line);
         }
 
@@ -3234,8 +3408,10 @@ mod tests {
         assert_eq!(output_lines.len(), 3, "expected 3 result lines");
         for line_str in &output_lines {
             let parsed: serde_json::Value = serde_json::from_str(line_str).unwrap();
-            assert!(parsed["phrases"].as_array().unwrap().len() > 0,
-                "each workspace-reusing line should produce phrases");
+            assert!(
+                parsed["phrases"].as_array().unwrap().len() > 0,
+                "each workspace-reusing line should produce phrases"
+            );
         }
     }
 }

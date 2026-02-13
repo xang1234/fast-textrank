@@ -28,18 +28,17 @@ use crate::pipeline::observer::{
 use crate::pipeline::traits::{
     CandidateGraphBuilder, CandidateSelector, ChunkPhraseBuilder, FocusTermsTeleportBuilder,
     GraphBuilder, GraphTransform, JaccardHacClusterer, MultipartitePhraseBuilder,
-    MultipartiteTransform, NoopGraphTransform, NoopPreprocessor, PageRankRanker,
-    PhraseCandidateSelector, PhraseBuilder, PositionTeleportBuilder, Preprocessor, Ranker,
-    ResultFormatter, StandardResultFormatter, TeleportBuilder, TopicGraphBuilder,
-    TopicRepresentativeBuilder, TopicWeightsTeleportBuilder, UniformTeleportBuilder,
-    WindowGraphBuilder, WordNodeSelector,
+    MultipartiteTransform, NoopGraphTransform, NoopPreprocessor, PageRankRanker, PhraseBuilder,
+    PhraseCandidateSelector, PositionTeleportBuilder, Preprocessor, Ranker, ResultFormatter,
+    StandardResultFormatter, TeleportBuilder, TopicGraphBuilder, TopicRepresentativeBuilder,
+    TopicWeightsTeleportBuilder, UniformTeleportBuilder, WindowGraphBuilder, WordNodeSelector,
 };
 #[cfg(feature = "sentence-rank")]
 use crate::pipeline::traits::{
     SentenceCandidateSelector, SentenceFormatter, SentenceGraphBuilder, SentencePhraseBuilder,
 };
-use std::collections::HashMap;
 use crate::types::TextRankConfig;
+use std::collections::HashMap;
 
 // ---------------------------------------------------------------------------
 // Conditional tracing support
@@ -53,7 +52,6 @@ macro_rules! trace_stage {
         let _span = tracing::info_span!("pipeline_stage", stage = $name).entered();
     };
 }
-
 
 // ============================================================================
 // Pipeline — statically-composed stage container
@@ -327,10 +325,8 @@ impl TopicRankPipeline {
         Pipeline {
             preprocessor: NoopPreprocessor,
             selector: PhraseCandidateSelector::new(chunks),
-            graph_builder: TopicGraphBuilder::new(
-                JaccardHacClusterer::new(similarity_threshold),
-            )
-            .with_edge_weight(edge_weight),
+            graph_builder: TopicGraphBuilder::new(JaccardHacClusterer::new(similarity_threshold))
+                .with_edge_weight(edge_weight),
             graph_transform: NoopGraphTransform,
             teleport_builder: UniformTeleportBuilder,
             ranker: PageRankRanker,
@@ -392,9 +388,9 @@ impl MultipartiteRankPipeline {
         Pipeline {
             preprocessor: NoopPreprocessor,
             selector: PhraseCandidateSelector::new(chunks),
-            graph_builder: CandidateGraphBuilder::new(
-                JaccardHacClusterer::new(similarity_threshold),
-            ),
+            graph_builder: CandidateGraphBuilder::new(JaccardHacClusterer::new(
+                similarity_threshold,
+            )),
             graph_transform: MultipartiteTransform::with_alpha(alpha),
             teleport_builder: UniformTeleportBuilder,
             ranker: PageRankRanker,
@@ -678,18 +674,16 @@ where
         }
 
         // Build debug payload (opt-in via cfg.debug_level).
-        let debug_payload = super::DebugPayload::build(
-            cfg.debug_level,
-            &graph,
-            &rank_output,
-            cfg.debug_top_k,
-        );
+        let debug_payload =
+            super::DebugPayload::build(cfg.debug_level, &graph, &rank_output, cfg.debug_top_k);
 
         // Stage 5: Format result
         trace_stage!(STAGE_FORMAT);
         observer.on_stage_start(STAGE_FORMAT);
         let clock = StageClock::start();
-        let result = self.formatter.format(&phrases, &rank_output, debug_payload, cfg);
+        let result = self
+            .formatter
+            .format(&phrases, &rank_output, debug_payload, cfg);
         let report = StageReport::new(clock.elapsed());
         observer.on_stage_end(STAGE_FORMAT, &report);
 
@@ -713,7 +707,16 @@ where
 ///     .graph_builder(WindowGraphBuilder::single_rank())
 ///     .build();
 /// ```
-pub struct PipelineBuilder<Pre = NoopPreprocessor, Sel = WordNodeSelector, GB = WindowGraphBuilder, GT = NoopGraphTransform, TB = UniformTeleportBuilder, Rnk = PageRankRanker, PB = ChunkPhraseBuilder, Fmt = StandardResultFormatter> {
+pub struct PipelineBuilder<
+    Pre = NoopPreprocessor,
+    Sel = WordNodeSelector,
+    GB = WindowGraphBuilder,
+    GT = NoopGraphTransform,
+    TB = UniformTeleportBuilder,
+    Rnk = PageRankRanker,
+    PB = ChunkPhraseBuilder,
+    Fmt = StandardResultFormatter,
+> {
     preprocessor: Pre,
     selector: Sel,
     graph_builder: GB,
@@ -748,7 +751,10 @@ impl Default for PipelineBuilder {
 
 impl<Pre, Sel, GB, GT, TB, Rnk, PB, Fmt> PipelineBuilder<Pre, Sel, GB, GT, TB, Rnk, PB, Fmt> {
     /// Override the preprocessor stage.
-    pub fn preprocessor<P: Preprocessor>(self, p: P) -> PipelineBuilder<P, Sel, GB, GT, TB, Rnk, PB, Fmt> {
+    pub fn preprocessor<P: Preprocessor>(
+        self,
+        p: P,
+    ) -> PipelineBuilder<P, Sel, GB, GT, TB, Rnk, PB, Fmt> {
         PipelineBuilder {
             preprocessor: p,
             selector: self.selector,
@@ -762,7 +768,10 @@ impl<Pre, Sel, GB, GT, TB, Rnk, PB, Fmt> PipelineBuilder<Pre, Sel, GB, GT, TB, R
     }
 
     /// Override the candidate selector stage.
-    pub fn selector<S: CandidateSelector>(self, s: S) -> PipelineBuilder<Pre, S, GB, GT, TB, Rnk, PB, Fmt> {
+    pub fn selector<S: CandidateSelector>(
+        self,
+        s: S,
+    ) -> PipelineBuilder<Pre, S, GB, GT, TB, Rnk, PB, Fmt> {
         PipelineBuilder {
             preprocessor: self.preprocessor,
             selector: s,
@@ -776,7 +785,10 @@ impl<Pre, Sel, GB, GT, TB, Rnk, PB, Fmt> PipelineBuilder<Pre, Sel, GB, GT, TB, R
     }
 
     /// Override the graph builder stage.
-    pub fn graph_builder<G: GraphBuilder>(self, g: G) -> PipelineBuilder<Pre, Sel, G, GT, TB, Rnk, PB, Fmt> {
+    pub fn graph_builder<G: GraphBuilder>(
+        self,
+        g: G,
+    ) -> PipelineBuilder<Pre, Sel, G, GT, TB, Rnk, PB, Fmt> {
         PipelineBuilder {
             preprocessor: self.preprocessor,
             selector: self.selector,
@@ -790,7 +802,10 @@ impl<Pre, Sel, GB, GT, TB, Rnk, PB, Fmt> PipelineBuilder<Pre, Sel, GB, GT, TB, R
     }
 
     /// Override the graph transform stage.
-    pub fn graph_transform<G: GraphTransform>(self, g: G) -> PipelineBuilder<Pre, Sel, GB, G, TB, Rnk, PB, Fmt> {
+    pub fn graph_transform<G: GraphTransform>(
+        self,
+        g: G,
+    ) -> PipelineBuilder<Pre, Sel, GB, G, TB, Rnk, PB, Fmt> {
         PipelineBuilder {
             preprocessor: self.preprocessor,
             selector: self.selector,
@@ -804,7 +819,10 @@ impl<Pre, Sel, GB, GT, TB, Rnk, PB, Fmt> PipelineBuilder<Pre, Sel, GB, GT, TB, R
     }
 
     /// Override the teleport builder stage.
-    pub fn teleport_builder<T: TeleportBuilder>(self, t: T) -> PipelineBuilder<Pre, Sel, GB, GT, T, Rnk, PB, Fmt> {
+    pub fn teleport_builder<T: TeleportBuilder>(
+        self,
+        t: T,
+    ) -> PipelineBuilder<Pre, Sel, GB, GT, T, Rnk, PB, Fmt> {
         PipelineBuilder {
             preprocessor: self.preprocessor,
             selector: self.selector,
@@ -832,7 +850,10 @@ impl<Pre, Sel, GB, GT, TB, Rnk, PB, Fmt> PipelineBuilder<Pre, Sel, GB, GT, TB, R
     }
 
     /// Override the phrase builder stage.
-    pub fn phrase_builder<P: PhraseBuilder>(self, p: P) -> PipelineBuilder<Pre, Sel, GB, GT, TB, Rnk, P, Fmt> {
+    pub fn phrase_builder<P: PhraseBuilder>(
+        self,
+        p: P,
+    ) -> PipelineBuilder<Pre, Sel, GB, GT, TB, Rnk, P, Fmt> {
         PipelineBuilder {
             preprocessor: self.preprocessor,
             selector: self.selector,
@@ -846,7 +867,10 @@ impl<Pre, Sel, GB, GT, TB, Rnk, PB, Fmt> PipelineBuilder<Pre, Sel, GB, GT, TB, R
     }
 
     /// Override the result formatter stage.
-    pub fn formatter<F: ResultFormatter>(self, f: F) -> PipelineBuilder<Pre, Sel, GB, GT, TB, Rnk, PB, F> {
+    pub fn formatter<F: ResultFormatter>(
+        self,
+        f: F,
+    ) -> PipelineBuilder<Pre, Sel, GB, GT, TB, Rnk, PB, F> {
         PipelineBuilder {
             preprocessor: self.preprocessor,
             selector: self.selector,
@@ -1306,10 +1330,10 @@ mod tests {
     /// reconstructs that path inline and compares to `SingleRankPipeline`.
     #[test]
     fn golden_single_rank_pipeline_matches_legacy() {
+        use super::SingleRankPipeline;
         use crate::graph::builder::GraphBuilder as LegacyGraphBuilder;
         use crate::graph::csr::CsrGraph;
         use crate::phrase::extraction::PhraseExtractor;
-        use super::SingleRankPipeline;
 
         let tokens = golden_tokens();
         let cfg = TextRankConfig::default();
@@ -1324,7 +1348,7 @@ mod tests {
         let builder = LegacyGraphBuilder::from_tokens_with_pos_and_boundaries(
             &tokens,
             cfg.window_size,
-            true,  // always weighted
+            true, // always weighted
             include_pos,
             cfg.use_pos_in_nodes,
             false, // cross-sentence windowing
@@ -1497,8 +1521,7 @@ mod tests {
         // Run with high weight on "machine".
         let mut biased_weights = HashMap::new();
         biased_weights.insert("machine".to_string(), 10.0);
-        let biased_pipeline =
-            super::TopicalPageRankPipeline::topical(biased_weights, 0.01);
+        let biased_pipeline = super::TopicalPageRankPipeline::topical(biased_weights, 0.01);
         let biased_result = {
             let stream = TokenStream::from_tokens(&tokens);
             let mut obs = NoopObserver;
@@ -1506,8 +1529,7 @@ mod tests {
         };
 
         // Run with uniform (all min_weight) — empty map.
-        let uniform_pipeline =
-            super::TopicalPageRankPipeline::topical(HashMap::new(), 1.0);
+        let uniform_pipeline = super::TopicalPageRankPipeline::topical(HashMap::new(), 1.0);
         let uniform_result = {
             let stream = TokenStream::from_tokens(&tokens);
             let mut obs = NoopObserver;
@@ -1554,8 +1576,7 @@ mod tests {
 
         // Build via type alias constructor.
         let alias_result = {
-            let pipeline =
-                super::TopicalPageRankPipeline::topical(weights.clone(), 0.01);
+            let pipeline = super::TopicalPageRankPipeline::topical(weights.clone(), 0.01);
             let stream = TokenStream::from_tokens(&tokens);
             let mut obs = NoopObserver;
             pipeline.run(stream, &cfg, &mut obs)
@@ -1697,8 +1718,7 @@ mod tests {
 
         // min_weight=0.0 → OOV candidates get zero teleport probability.
         let result_zero = {
-            let pipeline =
-                super::TopicalPageRankPipeline::topical(weights.clone(), 0.0);
+            let pipeline = super::TopicalPageRankPipeline::topical(weights.clone(), 0.0);
             let stream = TokenStream::from_tokens(&tokens);
             let mut obs = NoopObserver;
             pipeline.run(stream, &cfg, &mut obs)
@@ -1706,8 +1726,7 @@ mod tests {
 
         // min_weight=1.0 → OOV candidates get base teleport weight.
         let result_one = {
-            let pipeline =
-                super::TopicalPageRankPipeline::topical(weights, 1.0);
+            let pipeline = super::TopicalPageRankPipeline::topical(weights, 1.0);
             let stream = TokenStream::from_tokens(&tokens);
             let mut obs = NoopObserver;
             pipeline.run(stream, &cfg, &mut obs)
@@ -1853,8 +1872,7 @@ mod tests {
         let tokens = golden_tokens();
         let cfg = TextRankConfig::default();
 
-        let pipeline =
-            super::TopicalPageRankPipeline::topical(HashMap::new(), 0.0);
+        let pipeline = super::TopicalPageRankPipeline::topical(HashMap::new(), 0.0);
         let stream = TokenStream::from_tokens(&tokens);
         let mut obs = NoopObserver;
         let result = pipeline.run(stream, &cfg, &mut obs);
@@ -1921,9 +1939,27 @@ mod tests {
     fn topic_rank_chunks() -> Vec<crate::types::ChunkSpan> {
         use crate::types::ChunkSpan;
         vec![
-            ChunkSpan { start_token: 0, end_token: 2, start_char: 0, end_char: 16, sentence_idx: 0 },
-            ChunkSpan { start_token: 3, end_token: 5, start_char: 28, end_char: 41, sentence_idx: 1 },
-            ChunkSpan { start_token: 6, end_token: 8, start_char: 49, end_char: 64, sentence_idx: 2 },
+            ChunkSpan {
+                start_token: 0,
+                end_token: 2,
+                start_char: 0,
+                end_char: 16,
+                sentence_idx: 0,
+            },
+            ChunkSpan {
+                start_token: 3,
+                end_token: 5,
+                start_char: 28,
+                end_char: 41,
+                sentence_idx: 1,
+            },
+            ChunkSpan {
+                start_token: 6,
+                end_token: 8,
+                start_char: 49,
+                end_char: 64,
+                sentence_idx: 2,
+            },
         ]
     }
 
@@ -1937,7 +1973,10 @@ mod tests {
         let pipeline = TopicRankPipeline::topic_rank(topic_rank_chunks());
         let result = pipeline.run(stream, &cfg, &mut obs);
 
-        assert!(!result.phrases.is_empty(), "TopicRank should produce phrases");
+        assert!(
+            !result.phrases.is_empty(),
+            "TopicRank should produce phrases"
+        );
         assert!(result.converged, "PageRank should converge");
     }
 
@@ -1989,14 +2028,13 @@ mod tests {
         // Run with default edge_weight=1.0
         let stream1 = TokenStream::from_tokens(&tokens);
         let mut obs1 = NoopObserver;
-        let r1 = TopicRankPipeline::topic_rank(chunks.clone())
-            .run(stream1, &cfg, &mut obs1);
+        let r1 = TopicRankPipeline::topic_rank(chunks.clone()).run(stream1, &cfg, &mut obs1);
 
         // Run with edge_weight=10.0
         let stream2 = TokenStream::from_tokens(&tokens);
         let mut obs2 = NoopObserver;
-        let r2 = TopicRankPipeline::topic_rank_with(chunks, 0.25, 10.0)
-            .run(stream2, &cfg, &mut obs2);
+        let r2 =
+            TopicRankPipeline::topic_rank_with(chunks, 0.25, 10.0).run(stream2, &cfg, &mut obs2);
 
         // Same number of phrases, but scores should differ.
         assert_eq!(r1.phrases.len(), r2.phrases.len());
@@ -2016,15 +2054,13 @@ mod tests {
             Token::new("Machine", "machine", PosTag::Noun, 0, 7, 0, 0),
             Token::new("learning", "learning", PosTag::Noun, 8, 16, 0, 1),
         ];
-        let chunks = vec![
-            crate::types::ChunkSpan {
-                start_token: 0,
-                end_token: 2,
-                start_char: 0,
-                end_char: 16,
-                sentence_idx: 0,
-            },
-        ];
+        let chunks = vec![crate::types::ChunkSpan {
+            start_token: 0,
+            end_token: 2,
+            start_char: 0,
+            end_char: 16,
+            sentence_idx: 0,
+        }];
 
         let stream = TokenStream::from_tokens(&tokens);
         let cfg = TextRankConfig::default();
@@ -2033,7 +2069,11 @@ mod tests {
         let pipeline = TopicRankPipeline::topic_rank(chunks);
         let result = pipeline.run(stream, &cfg, &mut obs);
 
-        assert_eq!(result.phrases.len(), 1, "Single cluster should produce one phrase");
+        assert_eq!(
+            result.phrases.len(),
+            1,
+            "Single cluster should produce one phrase"
+        );
         assert!(result.phrases[0].score > 0.0);
     }
 
@@ -2056,14 +2096,15 @@ mod tests {
         // clusters → fewer phrases.
         let stream2 = TokenStream::from_tokens(&tokens);
         let mut obs2 = NoopObserver;
-        let r_relaxed = TopicRankPipeline::topic_rank_with(chunks, 0.01, 1.0)
-            .run(stream2, &cfg, &mut obs2);
+        let r_relaxed =
+            TopicRankPipeline::topic_rank_with(chunks, 0.01, 1.0).run(stream2, &cfg, &mut obs2);
 
         // Strict threshold should yield >= phrases than relaxed.
         assert!(
             r_strict.phrases.len() >= r_relaxed.phrases.len(),
             "Strict threshold (0.99) should yield >= phrases than relaxed (0.01): got {} vs {}",
-            r_strict.phrases.len(), r_relaxed.phrases.len()
+            r_strict.phrases.len(),
+            r_relaxed.phrases.len()
         );
     }
 
@@ -2081,7 +2122,10 @@ mod tests {
         let pipeline = super::MultipartiteRankPipeline::multipartite_rank(topic_rank_chunks());
         let result = pipeline.run(stream, &cfg, &mut obs);
 
-        assert!(!result.phrases.is_empty(), "MultipartiteRank should produce phrases");
+        assert!(
+            !result.phrases.is_empty(),
+            "MultipartiteRank should produce phrases"
+        );
         assert!(result.converged, "PageRank should converge");
     }
 
@@ -2134,23 +2178,25 @@ mod tests {
         // Alpha = 0.0 (no boost).
         let stream1 = TokenStream::from_tokens(&tokens);
         let mut obs1 = NoopObserver;
-        let r_no_boost = super::MultipartiteRankPipeline::multipartite_rank_with(
-            chunks.clone(), 0.26, 0.0,
-        ).run(stream1, &cfg, &mut obs1);
+        let r_no_boost =
+            super::MultipartiteRankPipeline::multipartite_rank_with(chunks.clone(), 0.26, 0.0)
+                .run(stream1, &cfg, &mut obs1);
 
         // Alpha = 5.0 (strong boost).
         let stream2 = TokenStream::from_tokens(&tokens);
         let mut obs2 = NoopObserver;
-        let r_high_boost = super::MultipartiteRankPipeline::multipartite_rank_with(
-            chunks, 0.26, 5.0,
-        ).run(stream2, &cfg, &mut obs2);
+        let r_high_boost =
+            super::MultipartiteRankPipeline::multipartite_rank_with(chunks, 0.26, 5.0)
+                .run(stream2, &cfg, &mut obs2);
 
         // Both should produce phrases.
         assert!(!r_no_boost.phrases.is_empty());
         assert!(!r_high_boost.phrases.is_empty());
 
         // With different alpha, scores should differ.
-        let any_diff = r_no_boost.phrases.iter()
+        let any_diff = r_no_boost
+            .phrases
+            .iter()
             .zip(r_high_boost.phrases.iter())
             .any(|(a, b)| (a.score - b.score).abs() > 1e-10 || a.text != b.text);
 
@@ -2169,16 +2215,15 @@ mod tests {
         // Very strict threshold → more clusters.
         let stream1 = TokenStream::from_tokens(&tokens);
         let mut obs1 = NoopObserver;
-        let r_strict = super::MultipartiteRankPipeline::multipartite_rank_with(
-            chunks.clone(), 0.99, 1.1,
-        ).run(stream1, &cfg, &mut obs1);
+        let r_strict =
+            super::MultipartiteRankPipeline::multipartite_rank_with(chunks.clone(), 0.99, 1.1)
+                .run(stream1, &cfg, &mut obs1);
 
         // Very relaxed threshold → fewer clusters.
         let stream2 = TokenStream::from_tokens(&tokens);
         let mut obs2 = NoopObserver;
-        let r_relaxed = super::MultipartiteRankPipeline::multipartite_rank_with(
-            chunks, 0.01, 1.1,
-        ).run(stream2, &cfg, &mut obs2);
+        let r_relaxed = super::MultipartiteRankPipeline::multipartite_rank_with(chunks, 0.01, 1.1)
+            .run(stream2, &cfg, &mut obs2);
 
         // Both should produce valid output.
         assert!(!r_strict.phrases.is_empty());
@@ -2191,15 +2236,13 @@ mod tests {
             Token::new("Machine", "machine", PosTag::Noun, 0, 7, 0, 0),
             Token::new("learning", "learning", PosTag::Noun, 8, 16, 0, 1),
         ];
-        let chunks = vec![
-            crate::types::ChunkSpan {
-                start_token: 0,
-                end_token: 2,
-                start_char: 0,
-                end_char: 16,
-                sentence_idx: 0,
-            },
-        ];
+        let chunks = vec![crate::types::ChunkSpan {
+            start_token: 0,
+            end_token: 2,
+            start_char: 0,
+            end_char: 16,
+            sentence_idx: 0,
+        }];
 
         let stream = TokenStream::from_tokens(&tokens);
         let cfg = TextRankConfig::default();
@@ -2208,7 +2251,11 @@ mod tests {
         let pipeline = super::MultipartiteRankPipeline::multipartite_rank(chunks);
         let result = pipeline.run(stream, &cfg, &mut obs);
 
-        assert_eq!(result.phrases.len(), 1, "Single candidate should produce one phrase");
+        assert_eq!(
+            result.phrases.len(),
+            1,
+            "Single candidate should produce one phrase"
+        );
         assert!(result.phrases[0].score > 0.0);
     }
 
@@ -2226,7 +2273,10 @@ mod tests {
         let pipeline = super::BaseTextRankPipeline::base_textrank();
         let result = pipeline.run(stream, &cfg, &mut obs);
 
-        assert!(result.debug.is_none(), "debug_level=None should produce no debug payload");
+        assert!(
+            result.debug.is_none(),
+            "debug_level=None should produce no debug payload"
+        );
     }
 
     #[test]
@@ -2240,12 +2290,18 @@ mod tests {
         let pipeline = super::BaseTextRankPipeline::base_textrank();
         let result = pipeline.run(stream, &cfg, &mut obs);
 
-        let debug = result.debug.as_ref().expect("Stats level should produce debug payload");
+        let debug = result
+            .debug
+            .as_ref()
+            .expect("Stats level should produce debug payload");
         let gs = debug.graph_stats.as_ref().expect("Should have graph_stats");
         assert!(gs.num_nodes > 0);
         assert!(gs.num_edges > 0);
 
-        let cs = debug.convergence_summary.as_ref().expect("Should have convergence_summary");
+        let cs = debug
+            .convergence_summary
+            .as_ref()
+            .expect("Should have convergence_summary");
         assert!(cs.iterations > 0);
         assert!(cs.converged);
 
@@ -2264,7 +2320,10 @@ mod tests {
         let pipeline = super::BaseTextRankPipeline::base_textrank();
         let result = pipeline.run(stream, &cfg, &mut obs);
 
-        let debug = result.debug.as_ref().expect("TopNodes level should produce debug payload");
+        let debug = result
+            .debug
+            .as_ref()
+            .expect("TopNodes level should produce debug payload");
         let scores = debug.node_scores.as_ref().expect("Should have node_scores");
         assert!(!scores.is_empty());
         // Scores should be sorted descending.
@@ -2277,14 +2336,16 @@ mod tests {
     fn test_pipeline_debug_full_has_residuals() {
         let tokens = sample_tokens();
         let stream = TokenStream::from_tokens(&tokens);
-        let cfg = TextRankConfig::default()
-            .with_debug_level(DebugLevel::Full);
+        let cfg = TextRankConfig::default().with_debug_level(DebugLevel::Full);
         let mut obs = NoopObserver;
 
         let pipeline = super::BaseTextRankPipeline::base_textrank();
         let result = pipeline.run(stream, &cfg, &mut obs);
 
-        let debug = result.debug.as_ref().expect("Full level should produce debug payload");
+        let debug = result
+            .debug
+            .as_ref()
+            .expect("Full level should produce debug payload");
         // Full includes everything from Stats and TopNodes.
         assert!(debug.graph_stats.is_some());
         assert!(debug.convergence_summary.is_some());
@@ -2301,8 +2362,7 @@ mod tests {
         let pipeline = super::BaseTextRankPipeline::base_textrank();
 
         let cfg_default = TextRankConfig::default();
-        let cfg_none = TextRankConfig::default()
-            .with_debug_level(DebugLevel::None);
+        let cfg_none = TextRankConfig::default().with_debug_level(DebugLevel::None);
 
         let r1 = pipeline.run(
             TokenStream::from_tokens(&sample_tokens()),
@@ -2377,20 +2437,13 @@ mod tests {
         // the DebugPayload::build path. Since Pipeline::run currently uses
         // DEFAULT_TOP_K, we test the DebugPayload::build path directly here.
         let stream = TokenStream::from_tokens(&tokens);
-        let cfg = TextRankConfig::default()
-            .with_debug_level(DebugLevel::TopNodes);
+        let cfg = TextRankConfig::default().with_debug_level(DebugLevel::TopNodes);
         let mut obs = NoopObserver;
 
         let pipeline = super::BaseTextRankPipeline::base_textrank();
         let result = pipeline.run(stream, &cfg, &mut obs);
 
-        let scores = result
-            .debug
-            .as_ref()
-            .unwrap()
-            .node_scores
-            .as_ref()
-            .unwrap();
+        let scores = result.debug.as_ref().unwrap().node_scores.as_ref().unwrap();
 
         // With DEFAULT_TOP_K (50), all nodes should be included since we have < 50.
         assert_eq!(scores.len(), num_content_tokens);
@@ -2417,37 +2470,62 @@ mod tests {
         // Stats level should have graph_stats + convergence_summary but NOT
         // node_scores, residuals, or cluster_memberships.
         let stream = TokenStream::from_tokens(&sample_tokens());
-        let cfg = TextRankConfig::default()
-            .with_debug_level(DebugLevel::Stats);
+        let cfg = TextRankConfig::default().with_debug_level(DebugLevel::Stats);
         let mut obs = NoopObserver;
 
         let pipeline = super::BaseTextRankPipeline::base_textrank();
         let result = pipeline.run(stream, &cfg, &mut obs);
 
         let debug = result.debug.as_ref().unwrap();
-        assert!(debug.graph_stats.is_some(), "Stats should include graph_stats");
-        assert!(debug.convergence_summary.is_some(), "Stats should include convergence_summary");
-        assert!(debug.node_scores.is_none(), "Stats should NOT include node_scores");
-        assert!(debug.residuals.is_none(), "Stats should NOT include residuals");
-        assert!(debug.cluster_memberships.is_none(), "Stats should NOT include cluster_memberships");
+        assert!(
+            debug.graph_stats.is_some(),
+            "Stats should include graph_stats"
+        );
+        assert!(
+            debug.convergence_summary.is_some(),
+            "Stats should include convergence_summary"
+        );
+        assert!(
+            debug.node_scores.is_none(),
+            "Stats should NOT include node_scores"
+        );
+        assert!(
+            debug.residuals.is_none(),
+            "Stats should NOT include residuals"
+        );
+        assert!(
+            debug.cluster_memberships.is_none(),
+            "Stats should NOT include cluster_memberships"
+        );
     }
 
     #[test]
     fn test_pipeline_debug_top_nodes_includes_stats() {
         // TopNodes is a superset of Stats.
         let stream = TokenStream::from_tokens(&sample_tokens());
-        let cfg = TextRankConfig::default()
-            .with_debug_level(DebugLevel::TopNodes);
+        let cfg = TextRankConfig::default().with_debug_level(DebugLevel::TopNodes);
         let mut obs = NoopObserver;
 
         let pipeline = super::BaseTextRankPipeline::base_textrank();
         let result = pipeline.run(stream, &cfg, &mut obs);
 
         let debug = result.debug.as_ref().unwrap();
-        assert!(debug.graph_stats.is_some(), "TopNodes should include graph_stats");
-        assert!(debug.convergence_summary.is_some(), "TopNodes should include convergence_summary");
-        assert!(debug.node_scores.is_some(), "TopNodes should include node_scores");
-        assert!(debug.residuals.is_none(), "TopNodes should NOT include residuals");
+        assert!(
+            debug.graph_stats.is_some(),
+            "TopNodes should include graph_stats"
+        );
+        assert!(
+            debug.convergence_summary.is_some(),
+            "TopNodes should include convergence_summary"
+        );
+        assert!(
+            debug.node_scores.is_some(),
+            "TopNodes should include node_scores"
+        );
+        assert!(
+            debug.residuals.is_none(),
+            "TopNodes should NOT include residuals"
+        );
     }
 
     #[test]
@@ -2482,8 +2560,7 @@ mod tests {
     #[test]
     fn test_pipeline_debug_payload_serde_roundtrip() {
         let stream = TokenStream::from_tokens(&sample_tokens());
-        let cfg = TextRankConfig::default()
-            .with_debug_level(DebugLevel::TopNodes);
+        let cfg = TextRankConfig::default().with_debug_level(DebugLevel::TopNodes);
         let mut obs = NoopObserver;
 
         let pipeline = super::BaseTextRankPipeline::base_textrank();
@@ -2522,8 +2599,7 @@ mod tests {
     fn test_pipeline_debug_with_stage_timing_observer() {
         // Verify that the observer collects timings regardless of debug level.
         let stream = TokenStream::from_tokens(&sample_tokens());
-        let cfg = TextRankConfig::default()
-            .with_debug_level(DebugLevel::Stats);
+        let cfg = TextRankConfig::default().with_debug_level(DebugLevel::Stats);
         let mut obs = StageTimingObserver::new();
 
         let pipeline = super::BaseTextRankPipeline::base_textrank();
@@ -2542,14 +2618,16 @@ mod tests {
     fn test_topic_rank_pipeline_debug_full_has_cluster_memberships() {
         let tokens = topic_rank_tokens();
         let stream = TokenStream::from_tokens(&tokens);
-        let cfg = TextRankConfig::default()
-            .with_debug_level(DebugLevel::Full);
+        let cfg = TextRankConfig::default().with_debug_level(DebugLevel::Full);
         let mut obs = NoopObserver;
 
         let pipeline = super::TopicRankPipeline::topic_rank(topic_rank_chunks());
         let result = pipeline.run(stream, &cfg, &mut obs);
 
-        let debug = result.debug.as_ref().expect("Full level should produce debug payload");
+        let debug = result
+            .debug
+            .as_ref()
+            .expect("Full level should produce debug payload");
         assert!(debug.graph_stats.is_some());
         assert!(debug.convergence_summary.is_some());
         assert!(debug.node_scores.is_some());
@@ -2559,10 +2637,7 @@ mod tests {
             .cluster_memberships
             .as_ref()
             .expect("Full level on topic-family pipeline should have cluster_memberships");
-        assert!(
-            !memberships.is_empty(),
-            "Should have at least one cluster",
-        );
+        assert!(!memberships.is_empty(), "Should have at least one cluster",);
         // Every candidate should appear in exactly one cluster.
         let total_candidates: usize = memberships.iter().map(|c| c.len()).sum();
         assert!(total_candidates > 0, "Clusters should contain candidates");
@@ -2572,8 +2647,7 @@ mod tests {
     fn test_base_pipeline_debug_full_no_cluster_memberships() {
         // BaseTextRank doesn't use clustering, so cluster_memberships should be None.
         let stream = TokenStream::from_tokens(&sample_tokens());
-        let cfg = TextRankConfig::default()
-            .with_debug_level(DebugLevel::Full);
+        let cfg = TextRankConfig::default().with_debug_level(DebugLevel::Full);
         let mut obs = NoopObserver;
 
         let pipeline = super::BaseTextRankPipeline::base_textrank();
@@ -2670,25 +2744,178 @@ mod tests {
     fn multi_sentence_tokens() -> Vec<Token> {
         vec![
             // Sentence 0: "Rust is a systems programming language"
-            Token { text: "Rust".into(), lemma: "rust".into(), pos: PosTag::ProperNoun, start: 0, end: 4, sentence_idx: 0, token_idx: 0, is_stopword: false },
-            Token { text: "is".into(), lemma: "be".into(), pos: PosTag::Verb, start: 5, end: 7, sentence_idx: 0, token_idx: 1, is_stopword: true },
-            Token { text: "a".into(), lemma: "a".into(), pos: PosTag::Determiner, start: 8, end: 9, sentence_idx: 0, token_idx: 2, is_stopword: true },
-            Token { text: "systems".into(), lemma: "system".into(), pos: PosTag::Noun, start: 10, end: 17, sentence_idx: 0, token_idx: 3, is_stopword: false },
-            Token { text: "programming".into(), lemma: "programming".into(), pos: PosTag::Noun, start: 18, end: 29, sentence_idx: 0, token_idx: 4, is_stopword: false },
-            Token { text: "language".into(), lemma: "language".into(), pos: PosTag::Noun, start: 30, end: 38, sentence_idx: 0, token_idx: 5, is_stopword: false },
+            Token {
+                text: "Rust".into(),
+                lemma: "rust".into(),
+                pos: PosTag::ProperNoun,
+                start: 0,
+                end: 4,
+                sentence_idx: 0,
+                token_idx: 0,
+                is_stopword: false,
+            },
+            Token {
+                text: "is".into(),
+                lemma: "be".into(),
+                pos: PosTag::Verb,
+                start: 5,
+                end: 7,
+                sentence_idx: 0,
+                token_idx: 1,
+                is_stopword: true,
+            },
+            Token {
+                text: "a".into(),
+                lemma: "a".into(),
+                pos: PosTag::Determiner,
+                start: 8,
+                end: 9,
+                sentence_idx: 0,
+                token_idx: 2,
+                is_stopword: true,
+            },
+            Token {
+                text: "systems".into(),
+                lemma: "system".into(),
+                pos: PosTag::Noun,
+                start: 10,
+                end: 17,
+                sentence_idx: 0,
+                token_idx: 3,
+                is_stopword: false,
+            },
+            Token {
+                text: "programming".into(),
+                lemma: "programming".into(),
+                pos: PosTag::Noun,
+                start: 18,
+                end: 29,
+                sentence_idx: 0,
+                token_idx: 4,
+                is_stopword: false,
+            },
+            Token {
+                text: "language".into(),
+                lemma: "language".into(),
+                pos: PosTag::Noun,
+                start: 30,
+                end: 38,
+                sentence_idx: 0,
+                token_idx: 5,
+                is_stopword: false,
+            },
             // Sentence 1: "Python is popular for data science"
-            Token { text: "Python".into(), lemma: "python".into(), pos: PosTag::ProperNoun, start: 40, end: 46, sentence_idx: 1, token_idx: 6, is_stopword: false },
-            Token { text: "is".into(), lemma: "be".into(), pos: PosTag::Verb, start: 47, end: 49, sentence_idx: 1, token_idx: 7, is_stopword: true },
-            Token { text: "popular".into(), lemma: "popular".into(), pos: PosTag::Adjective, start: 50, end: 57, sentence_idx: 1, token_idx: 8, is_stopword: false },
-            Token { text: "for".into(), lemma: "for".into(), pos: PosTag::Preposition, start: 58, end: 61, sentence_idx: 1, token_idx: 9, is_stopword: true },
-            Token { text: "data".into(), lemma: "data".into(), pos: PosTag::Noun, start: 62, end: 66, sentence_idx: 1, token_idx: 10, is_stopword: false },
-            Token { text: "science".into(), lemma: "science".into(), pos: PosTag::Noun, start: 67, end: 74, sentence_idx: 1, token_idx: 11, is_stopword: false },
+            Token {
+                text: "Python".into(),
+                lemma: "python".into(),
+                pos: PosTag::ProperNoun,
+                start: 40,
+                end: 46,
+                sentence_idx: 1,
+                token_idx: 6,
+                is_stopword: false,
+            },
+            Token {
+                text: "is".into(),
+                lemma: "be".into(),
+                pos: PosTag::Verb,
+                start: 47,
+                end: 49,
+                sentence_idx: 1,
+                token_idx: 7,
+                is_stopword: true,
+            },
+            Token {
+                text: "popular".into(),
+                lemma: "popular".into(),
+                pos: PosTag::Adjective,
+                start: 50,
+                end: 57,
+                sentence_idx: 1,
+                token_idx: 8,
+                is_stopword: false,
+            },
+            Token {
+                text: "for".into(),
+                lemma: "for".into(),
+                pos: PosTag::Preposition,
+                start: 58,
+                end: 61,
+                sentence_idx: 1,
+                token_idx: 9,
+                is_stopword: true,
+            },
+            Token {
+                text: "data".into(),
+                lemma: "data".into(),
+                pos: PosTag::Noun,
+                start: 62,
+                end: 66,
+                sentence_idx: 1,
+                token_idx: 10,
+                is_stopword: false,
+            },
+            Token {
+                text: "science".into(),
+                lemma: "science".into(),
+                pos: PosTag::Noun,
+                start: 67,
+                end: 74,
+                sentence_idx: 1,
+                token_idx: 11,
+                is_stopword: false,
+            },
             // Sentence 2: "Both languages support machine learning"
-            Token { text: "Both".into(), lemma: "both".into(), pos: PosTag::Determiner, start: 76, end: 80, sentence_idx: 2, token_idx: 12, is_stopword: true },
-            Token { text: "languages".into(), lemma: "language".into(), pos: PosTag::Noun, start: 81, end: 90, sentence_idx: 2, token_idx: 13, is_stopword: false },
-            Token { text: "support".into(), lemma: "support".into(), pos: PosTag::Verb, start: 91, end: 98, sentence_idx: 2, token_idx: 14, is_stopword: false },
-            Token { text: "machine".into(), lemma: "machine".into(), pos: PosTag::Noun, start: 99, end: 106, sentence_idx: 2, token_idx: 15, is_stopword: false },
-            Token { text: "learning".into(), lemma: "learning".into(), pos: PosTag::Noun, start: 107, end: 115, sentence_idx: 2, token_idx: 16, is_stopword: false },
+            Token {
+                text: "Both".into(),
+                lemma: "both".into(),
+                pos: PosTag::Determiner,
+                start: 76,
+                end: 80,
+                sentence_idx: 2,
+                token_idx: 12,
+                is_stopword: true,
+            },
+            Token {
+                text: "languages".into(),
+                lemma: "language".into(),
+                pos: PosTag::Noun,
+                start: 81,
+                end: 90,
+                sentence_idx: 2,
+                token_idx: 13,
+                is_stopword: false,
+            },
+            Token {
+                text: "support".into(),
+                lemma: "support".into(),
+                pos: PosTag::Verb,
+                start: 91,
+                end: 98,
+                sentence_idx: 2,
+                token_idx: 14,
+                is_stopword: false,
+            },
+            Token {
+                text: "machine".into(),
+                lemma: "machine".into(),
+                pos: PosTag::Noun,
+                start: 99,
+                end: 106,
+                sentence_idx: 2,
+                token_idx: 15,
+                is_stopword: false,
+            },
+            Token {
+                text: "learning".into(),
+                lemma: "learning".into(),
+                pos: PosTag::Noun,
+                start: 107,
+                end: 115,
+                sentence_idx: 2,
+                token_idx: 16,
+                is_stopword: false,
+            },
         ]
     }
 
@@ -2715,7 +2942,10 @@ mod tests {
         let mut obs = NoopObserver;
 
         let result = pipeline.run(stream, &cfg, &mut obs);
-        assert!(!result.phrases.is_empty(), "SentenceRank should produce phrases");
+        assert!(
+            !result.phrases.is_empty(),
+            "SentenceRank should produce phrases"
+        );
         assert!(result.converged);
     }
 

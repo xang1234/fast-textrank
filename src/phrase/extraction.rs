@@ -171,9 +171,7 @@ impl PhraseExtractor {
                         let canonical = variant_counts
                             .into_iter()
                             .max_by(|(text_a, count_a), (text_b, count_b)| {
-                                count_a
-                                    .cmp(count_b)
-                                    .then_with(|| text_b.cmp(text_a))
+                                count_a.cmp(count_b).then_with(|| text_b.cmp(text_a))
                             })
                             .map(|(text, _)| text)
                             .unwrap_or_else(|| group_key.clone());
@@ -468,7 +466,11 @@ mod tests {
 
         // Scores (within epsilon)
         assert_score(result.phrases[0].score, 0.2846505870, "Machine learning");
-        assert_score(result.phrases[1].score, 0.2846505870, "artificial intelligence");
+        assert_score(
+            result.phrases[1].score,
+            0.2846505870,
+            "artificial intelligence",
+        );
         assert_score(result.phrases[2].score, 0.2153494130, "subset");
 
         // Ranks (1-indexed)
@@ -510,7 +512,11 @@ mod tests {
         );
 
         // Scores (within epsilon)
-        assert_score(result.phrases[0].score, 0.4249608102, "Machine learning models");
+        assert_score(
+            result.phrases[0].score,
+            0.4249608102,
+            "Machine learning models",
+        );
         assert_score(result.phrases[1].score, 0.3179496860, "Machine learning");
         assert_score(result.phrases[2].score, 0.2746293119, "Deep learning");
         assert_score(result.phrases[3].score, 0.1412982971, "neural networks");

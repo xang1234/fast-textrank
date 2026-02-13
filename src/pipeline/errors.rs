@@ -57,11 +57,7 @@ pub struct PipelineSpecError {
 
 impl PipelineSpecError {
     /// Create a new spec error.
-    pub fn new(
-        code: ErrorCode,
-        path: impl Into<String>,
-        message: impl Into<String>,
-    ) -> Self {
+    pub fn new(code: ErrorCode, path: impl Into<String>, message: impl Into<String>) -> Self {
         Self {
             code,
             path: path.into(),
@@ -163,12 +159,9 @@ mod tests {
 
     #[test]
     fn test_spec_error_with_hint() {
-        let err = PipelineSpecError::new(
-            ErrorCode::InvalidValue,
-            "/top_n",
-            "top_n must be positive",
-        )
-        .with_hint("Set top_n to a value >= 1");
+        let err =
+            PipelineSpecError::new(ErrorCode::InvalidValue, "/top_n", "top_n must be positive")
+                .with_hint("Set top_n to a value >= 1");
 
         assert_eq!(err.hint.as_deref(), Some("Set top_n to a value >= 1"));
     }
@@ -218,11 +211,7 @@ mod tests {
 
     #[test]
     fn test_spec_error_is_std_error() {
-        let err = PipelineSpecError::new(
-            ErrorCode::ValidationFailed,
-            "",
-            "Spec validation failed",
-        );
+        let err = PipelineSpecError::new(ErrorCode::ValidationFailed, "", "Spec validation failed");
         // Verify it implements std::error::Error via thiserror
         let _: &dyn std::error::Error = &err;
     }

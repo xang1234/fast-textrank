@@ -193,7 +193,11 @@ pub fn single_linkage_distance(
             }
         }
     }
-    if min == f64::INFINITY { 0.0 } else { min }
+    if min == f64::INFINITY {
+        0.0
+    } else {
+        min
+    }
 }
 
 /// Complete linkage distance between two clusters (maximum pairwise distance).
@@ -509,9 +513,9 @@ mod tests {
         // Build a chain: A∩B high overlap, B∩C high overlap, A∩C disjoint.
         // Single linkage chains A-B-C into one cluster; complete keeps them apart.
         let candidates = vec![
-            make_candidate(&["a", "b", "c"], 0),       // A
-            make_candidate(&["b", "c", "d"], 1),        // B — overlaps A
-            make_candidate(&["d", "e", "f"], 2),        // C — overlaps B but not A
+            make_candidate(&["a", "b", "c"], 0), // A
+            make_candidate(&["b", "c", "d"], 1), // B — overlaps A
+            make_candidate(&["d", "e", "f"], 2), // C — overlaps B but not A
         ];
         let single = cluster_phrases_with_linkage(&candidates, 0.25, Linkage::Single);
         let complete = cluster_phrases_with_linkage(&candidates, 0.25, Linkage::Complete);
@@ -525,7 +529,7 @@ mod tests {
     fn test_cluster_u32_term_sets_basic() {
         let sets: Vec<FxHashSet<u32>> = vec![
             [1, 2].into_iter().collect(),
-            [1, 2].into_iter().collect(),  // identical to first
+            [1, 2].into_iter().collect(),    // identical to first
             [99, 100].into_iter().collect(), // disjoint
         ];
         let clusters = cluster_u32_term_sets(&sets, 0.25, Linkage::Average);

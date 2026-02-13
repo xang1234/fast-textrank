@@ -347,14 +347,8 @@ impl Phrase {
         }
 
         // Tie-breaker 2: shorter phrase length (ascending token count).
-        let self_len = self
-            .offsets
-            .first()
-            .map_or(0, |o| o.1.saturating_sub(o.0));
-        let other_len = other
-            .offsets
-            .first()
-            .map_or(0, |o| o.1.saturating_sub(o.0));
+        let self_len = self.offsets.first().map_or(0, |o| o.1.saturating_sub(o.0));
+        let other_len = other.offsets.first().map_or(0, |o| o.1.saturating_sub(o.0));
         let len_ord = self_len.cmp(&other_len);
         if len_ord != std::cmp::Ordering::Equal {
             return len_ord;
@@ -908,8 +902,8 @@ mod tests {
     #[test]
     fn test_stable_cmp_tie_shorter_phrase() {
         let a = phrase("alpha", 0.5, vec![(2, 3)]); // length 1
-        let b = phrase("beta", 0.5, vec![(2, 5)]);  // length 3
-        // Same score, same position → shorter phrase wins.
+        let b = phrase("beta", 0.5, vec![(2, 5)]); // length 3
+                                                   // Same score, same position → shorter phrase wins.
         assert_eq!(a.stable_cmp(&b), std::cmp::Ordering::Less);
         assert_eq!(b.stable_cmp(&a), std::cmp::Ordering::Greater);
     }
@@ -955,12 +949,12 @@ mod tests {
         let mut phrases = vec![
             phrase("delta", 0.3, vec![(10, 12)]),
             phrase("alpha", 0.5, vec![(0, 1)]),
-            phrase("gamma", 0.5, vec![(0, 3)]),  // same pos as alpha, longer
+            phrase("gamma", 0.5, vec![(0, 3)]), // same pos as alpha, longer
             phrase("beta", 0.8, vec![(5, 7)]),
         ];
         phrases.sort_by(|a, b| a.stable_cmp(b));
 
-        assert_eq!(phrases[0].lemma, "beta");  // highest score (0.8)
+        assert_eq!(phrases[0].lemma, "beta"); // highest score (0.8)
         assert_eq!(phrases[1].lemma, "alpha"); // score 0.5, pos 0, len 1
         assert_eq!(phrases[2].lemma, "gamma"); // score 0.5, pos 0, len 3
         assert_eq!(phrases[3].lemma, "delta"); // lowest score (0.3)

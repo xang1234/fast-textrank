@@ -19,31 +19,28 @@
 
 use std::collections::HashMap;
 
-use crate::pipeline::errors::PipelineSpecError;
+use crate::pipeline::artifacts::{CandidateSetRef, Graph, TokenStreamRef};
 use crate::pipeline::error_code::ErrorCode;
+use crate::pipeline::errors::PipelineSpecError;
 use crate::pipeline::runner::Pipeline;
 use crate::pipeline::spec::{
-    CandidatesSpec, ClusteringSpec, EdgeWeightingSpec, GraphSpec, GraphTransformSpec,
-    PipelineSpec, PipelineSpecV1, TeleportSpec, resolve_spec,
+    resolve_spec, CandidatesSpec, ClusteringSpec, EdgeWeightingSpec, GraphSpec, GraphTransformSpec,
+    PipelineSpec, PipelineSpecV1, TeleportSpec,
 };
-use crate::pipeline::validation::ValidationEngine;
 use crate::pipeline::traits::{
-    CandidateGraphBuilder, CandidateSelector, ChunkPhraseBuilder, Clusterer,
-    EdgeWeightPolicy, FocusTermsTeleportBuilder, GraphBuilder, GraphTransform,
-    JaccardHacClusterer, MultipartitePhraseBuilder, MultipartiteTransform, NoopGraphTransform,
-    NoopPreprocessor, PageRankRanker, PhraseBuilder, PhraseCandidateSelector,
-    PositionTeleportBuilder, Preprocessor, Ranker, ResultFormatter,
-    StandardResultFormatter, TeleportBuilder,
-    TopicGraphBuilder, TopicRepresentativeBuilder, TopicWeightsTeleportBuilder,
-    UniformTeleportBuilder, WindowGraphBuilder, WindowStrategy, WordNodeSelector,
+    CandidateGraphBuilder, CandidateSelector, ChunkPhraseBuilder, Clusterer, EdgeWeightPolicy,
+    FocusTermsTeleportBuilder, GraphBuilder, GraphTransform, JaccardHacClusterer,
+    MultipartitePhraseBuilder, MultipartiteTransform, NoopGraphTransform, NoopPreprocessor,
+    PageRankRanker, PhraseBuilder, PhraseCandidateSelector, PositionTeleportBuilder, Preprocessor,
+    Ranker, ResultFormatter, StandardResultFormatter, TeleportBuilder, TopicGraphBuilder,
+    TopicRepresentativeBuilder, TopicWeightsTeleportBuilder, UniformTeleportBuilder,
+    WindowGraphBuilder, WindowStrategy, WordNodeSelector,
 };
 #[cfg(feature = "sentence-rank")]
 use crate::pipeline::traits::{
     SentenceCandidateSelector, SentenceFormatter, SentenceGraphBuilder, SentencePhraseBuilder,
 };
-use crate::pipeline::artifacts::{
-    CandidateSetRef, Graph, TokenStreamRef,
-};
+use crate::pipeline::validation::ValidationEngine;
 use crate::types::{ChunkSpan, TextRankConfig};
 
 // ─── DynPipeline type alias ────────────────────────────────────────────────
@@ -172,9 +169,7 @@ impl SpecPipelineBuilder {
                 Box::new(PhraseCandidateSelector::new(self.chunks.clone()))
             }
             #[cfg(feature = "sentence-rank")]
-            Some(CandidatesSpec::SentenceCandidates) => {
-                Box::new(SentenceCandidateSelector)
-            }
+            Some(CandidatesSpec::SentenceCandidates) => Box::new(SentenceCandidateSelector),
         };
 
         // ── Clustering (resolved early — graph builders may need it) ──
@@ -243,18 +238,19 @@ impl SpecPipelineBuilder {
         };
 
         // ── Graph Transforms ──────────────────────────────────────────
-        let graph_transform: Box<dyn GraphTransform + Send + Sync> = if modules.graph_transforms.is_empty() {
-            Box::new(NoopGraphTransform)
-        } else if modules.graph_transforms.len() == 1 {
-            self.make_graph_transform(&modules.graph_transforms[0])
-        } else {
-            let transforms: Vec<Box<dyn GraphTransform + Send + Sync>> = modules
-                .graph_transforms
-                .iter()
-                .map(|spec| self.make_graph_transform(spec))
-                .collect();
-            Box::new(ChainedGraphTransform { transforms })
-        };
+        let graph_transform: Box<dyn GraphTransform + Send + Sync> =
+            if modules.graph_transforms.is_empty() {
+                Box::new(NoopGraphTransform)
+            } else if modules.graph_transforms.len() == 1 {
+                self.make_graph_transform(&modules.graph_transforms[0])
+            } else {
+                let transforms: Vec<Box<dyn GraphTransform + Send + Sync>> = modules
+                    .graph_transforms
+                    .iter()
+                    .map(|spec| self.make_graph_transform(spec))
+                    .collect();
+                Box::new(ChainedGraphTransform { transforms })
+            };
 
         // ── Teleport ──────────────────────────────────────────────────
         let teleport_builder: Box<dyn TeleportBuilder + Send + Sync> = match &modules.teleport {
@@ -382,7 +378,10 @@ impl SpecPipelineBuilder {
     }
 
     /// Map a single `GraphTransformSpec` to a boxed impl.
-    fn make_graph_transform(&self, spec: &GraphTransformSpec) -> Box<dyn GraphTransform + Send + Sync> {
+    fn make_graph_transform(
+        &self,
+        spec: &GraphTransformSpec,
+    ) -> Box<dyn GraphTransform + Send + Sync> {
         match spec {
             GraphTransformSpec::RemoveIntraClusterEdges => {
                 // IntraTopicEdgeRemover needs assignments at runtime, but
@@ -464,12 +463,48 @@ mod tests {
 
     fn golden_chunks() -> Vec<ChunkSpan> {
         vec![
-            ChunkSpan { start_token: 0, end_token: 2, start_char: 0, end_char: 16, sentence_idx: 0 },
-            ChunkSpan { start_token: 3, end_token: 4, start_char: 22, end_char: 32, sentence_idx: 0 },
-            ChunkSpan { start_token: 4, end_token: 6, start_char: 34, end_char: 47, sentence_idx: 1 },
-            ChunkSpan { start_token: 7, end_token: 9, start_char: 53, end_char: 68, sentence_idx: 1 },
-            ChunkSpan { start_token: 9, end_token: 12, start_char: 70, end_char: 93, sentence_idx: 2 },
-            ChunkSpan { start_token: 14, end_token: 15, start_char: 107, end_char: 111, sentence_idx: 2 },
+            ChunkSpan {
+                start_token: 0,
+                end_token: 2,
+                start_char: 0,
+                end_char: 16,
+                sentence_idx: 0,
+            },
+            ChunkSpan {
+                start_token: 3,
+                end_token: 4,
+                start_char: 22,
+                end_char: 32,
+                sentence_idx: 0,
+            },
+            ChunkSpan {
+                start_token: 4,
+                end_token: 6,
+                start_char: 34,
+                end_char: 47,
+                sentence_idx: 1,
+            },
+            ChunkSpan {
+                start_token: 7,
+                end_token: 9,
+                start_char: 53,
+                end_char: 68,
+                sentence_idx: 1,
+            },
+            ChunkSpan {
+                start_token: 9,
+                end_token: 12,
+                start_char: 70,
+                end_char: 93,
+                sentence_idx: 2,
+            },
+            ChunkSpan {
+                start_token: 14,
+                end_token: 15,
+                start_char: 107,
+                end_char: 111,
+                sentence_idx: 2,
+            },
         ]
     }
 
@@ -557,7 +592,9 @@ mod tests {
         let mut spec = minimal_spec();
         spec.modules.candidates = Some(CandidatesSpec::PhraseCandidates);
         spec.modules.graph = Some(GraphSpec::TopicGraph);
-        spec.modules.clustering = Some(ClusteringSpec::Hac { threshold: Some(0.25) });
+        spec.modules.clustering = Some(ClusteringSpec::Hac {
+            threshold: Some(0.25),
+        });
         let cfg = deterministic_config();
         let pipeline = SpecPipelineBuilder::new()
             .with_chunks(golden_chunks())
@@ -748,7 +785,9 @@ mod tests {
         let mut spec = minimal_spec();
         spec.modules.candidates = Some(CandidatesSpec::PhraseCandidates);
         spec.modules.graph = Some(GraphSpec::TopicGraph);
-        spec.modules.clustering = Some(ClusteringSpec::Hac { threshold: Some(0.25) });
+        spec.modules.clustering = Some(ClusteringSpec::Hac {
+            threshold: Some(0.25),
+        });
         let dyn_pipeline = SpecPipelineBuilder::new()
             .with_chunks(chunks)
             .build(&spec, &cfg)

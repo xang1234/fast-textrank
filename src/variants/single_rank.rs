@@ -10,10 +10,10 @@
 //! The rest of the pipeline (standard PageRank, phrase extraction) is
 //! identical to base TextRank.
 
+use crate::phrase::extraction::ExtractionResult;
 use crate::pipeline::artifacts::TokenStream;
 use crate::pipeline::observer::NoopObserver;
 use crate::pipeline::runner::SingleRankPipeline;
-use crate::phrase::extraction::ExtractionResult;
 use crate::types::{Phrase, TextRankConfig, Token};
 
 /// SingleRank implementation

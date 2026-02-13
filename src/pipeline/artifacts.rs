@@ -542,10 +542,7 @@ impl CandidateSet {
     ///
     /// Each chunk is turned into a [`PhraseCandidate`] whose `lemma_ids` and
     /// `term_ids` are resolved against the token stream's interning pool.
-    pub fn from_phrase_chunks(
-        stream: &TokenStream,
-        chunks: &[crate::types::ChunkSpan],
-    ) -> Self {
+    pub fn from_phrase_chunks(stream: &TokenStream, chunks: &[crate::types::ChunkSpan]) -> Self {
         let mut phrases = Vec::with_capacity(chunks.len());
 
         for chunk in chunks {
@@ -1451,11 +1448,8 @@ impl PhraseSet {
         let entries = phrases
             .iter()
             .map(|p| {
-                let lemma_ids: Vec<u32> = p
-                    .lemma
-                    .split_whitespace()
-                    .map(|w| pool.intern(w))
-                    .collect();
+                let lemma_ids: Vec<u32> =
+                    p.lemma.split_whitespace().map(|w| pool.intern(w)).collect();
                 let spans = if p.offsets.is_empty() {
                     None
                 } else {
@@ -1595,7 +1589,9 @@ pub struct FormattedResult {
 /// assert!(level.includes_node_scores());
 /// assert!(!level.includes_full());
 /// ```
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default, Serialize, Deserialize)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default, Serialize, Deserialize,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum DebugLevel {
     /// No debug output (default). Zero overhead on the hot path.
@@ -1811,11 +1807,7 @@ impl FormattedResult {
     }
 
     /// Build directly.
-    pub fn new(
-        phrases: Vec<crate::types::Phrase>,
-        converged: bool,
-        iterations: u32,
-    ) -> Self {
+    pub fn new(phrases: Vec<crate::types::Phrase>, converged: bool, iterations: u32) -> Self {
         Self {
             phrases,
             converged,
@@ -1873,11 +1865,7 @@ impl PipelineWorkspace {
     /// Create a workspace with pre-allocated buffer capacities.
     ///
     /// Useful when approximate document sizes are known up front.
-    pub fn with_capacity(
-        edge_cap: usize,
-        node_cap: usize,
-        phrase_cap: usize,
-    ) -> Self {
+    pub fn with_capacity(edge_cap: usize, node_cap: usize, phrase_cap: usize) -> Self {
         Self {
             edge_buf: Vec::with_capacity(edge_cap),
             score_buf: Vec::with_capacity(node_cap),
@@ -2164,19 +2152,13 @@ mod tests {
         assert_eq!(cs_pos.len(), 1);
 
         // Allow both ADJ and ADV explicitly:
-        let cs_both = CandidateSet::from_word_tokens(
-            &stream,
-            &[PosTag::Adjective, PosTag::Adverb],
-            true,
-        );
+        let cs_both =
+            CandidateSet::from_word_tokens(&stream, &[PosTag::Adjective, PosTag::Adverb], true);
         assert_eq!(cs_both.len(), 2);
 
         // Without POS in nodes: same lemma → deduplicated to one.
-        let cs_no_pos = CandidateSet::from_word_tokens(
-            &stream,
-            &[PosTag::Adjective, PosTag::Adverb],
-            false,
-        );
+        let cs_no_pos =
+            CandidateSet::from_word_tokens(&stream, &[PosTag::Adjective, PosTag::Adverb], false);
         assert_eq!(cs_no_pos.len(), 1);
     }
 
@@ -2191,9 +2173,10 @@ mod tests {
         let cs = CandidateSet::from_word_tokens(&stream, &[], true);
 
         let words = cs.words();
-        let great = words.iter().find(|w| {
-            stream.pool().get(w.lemma_id) == Some("great")
-        }).unwrap();
+        let great = words
+            .iter()
+            .find(|w| stream.pool().get(w.lemma_id) == Some("great"))
+            .unwrap();
         // First position is token 0, not 2.
         assert_eq!(great.first_position, 0);
     }
@@ -2234,15 +2217,13 @@ mod tests {
         ];
         let stream = TokenStream::from_tokens(&tokens);
 
-        let chunks = vec![
-            crate::types::ChunkSpan {
-                start_token: 0,
-                end_token: 2,
-                start_char: 0,
-                end_char: 16,
-                sentence_idx: 0,
-            },
-        ];
+        let chunks = vec![crate::types::ChunkSpan {
+            start_token: 0,
+            end_token: 2,
+            start_char: 0,
+            end_char: 16,
+            sentence_idx: 0,
+        }];
 
         let cs = CandidateSet::from_phrase_chunks(&stream, &chunks);
         assert!(matches!(cs.kind(), CandidateKind::Phrases(_)));
@@ -2335,9 +2316,7 @@ mod tests {
     #[test]
     #[should_panic(expected = "called words() on non-word")]
     fn test_phrases_panics_on_words_access() {
-        let stream = TokenStream::from_tokens(&[
-            Token::new("a", "a", PosTag::Noun, 0, 1, 0, 0),
-        ]);
+        let stream = TokenStream::from_tokens(&[Token::new("a", "a", PosTag::Noun, 0, 1, 0, 0)]);
         let chunks = vec![crate::types::ChunkSpan {
             start_token: 0,
             end_token: 1,
@@ -3030,14 +3009,12 @@ mod tests {
     fn debug_test_graph_and_ranks() -> (Graph, RankOutput) {
         let builder = sample_graph_builder(); // 3 nodes: machine|NOUN, learning|NOUN, great|ADJ
         let graph = Graph::from_builder(&builder);
-        let ranks = RankOutput::from_pagerank_result(
-            &crate::pagerank::PageRankResult {
-                scores: vec![0.5, 0.3, 0.2],
-                iterations: 42,
-                delta: 1e-7,
-                converged: true,
-            },
-        );
+        let ranks = RankOutput::from_pagerank_result(&crate::pagerank::PageRankResult {
+            scores: vec![0.5, 0.3, 0.2],
+            iterations: 42,
+            delta: 1e-7,
+            converged: true,
+        });
         (graph, ranks)
     }
 
@@ -3052,7 +3029,10 @@ mod tests {
         let (graph, ranks) = debug_test_graph_and_ranks();
         let payload = DebugPayload::build(DebugLevel::Stats, &graph, &ranks, 50).unwrap();
 
-        let gs = payload.graph_stats.as_ref().expect("graph_stats should be populated");
+        let gs = payload
+            .graph_stats
+            .as_ref()
+            .expect("graph_stats should be populated");
         assert_eq!(gs.num_nodes, 3);
         assert_eq!(gs.num_edges, 6); // 3 undirected = 6 directed
         assert!(!gs.is_transformed);
@@ -3063,7 +3043,10 @@ mod tests {
         let (graph, ranks) = debug_test_graph_and_ranks();
         let payload = DebugPayload::build(DebugLevel::Stats, &graph, &ranks, 50).unwrap();
 
-        let cs = payload.convergence_summary.as_ref().expect("convergence_summary should be populated");
+        let cs = payload
+            .convergence_summary
+            .as_ref()
+            .expect("convergence_summary should be populated");
         assert_eq!(cs.iterations, 42);
         assert!(cs.converged);
         assert!((cs.final_delta - 1e-7).abs() < 1e-15);
@@ -3074,7 +3057,10 @@ mod tests {
         let (graph, ranks) = debug_test_graph_and_ranks();
         let payload = DebugPayload::build(DebugLevel::Stats, &graph, &ranks, 50).unwrap();
 
-        assert!(payload.node_scores.is_none(), "Stats level should not include node_scores");
+        assert!(
+            payload.node_scores.is_none(),
+            "Stats level should not include node_scores"
+        );
         assert!(payload.residuals.is_none());
         assert!(payload.cluster_memberships.is_none());
     }
@@ -3084,7 +3070,10 @@ mod tests {
         let (graph, ranks) = debug_test_graph_and_ranks();
         let payload = DebugPayload::build(DebugLevel::TopNodes, &graph, &ranks, 50).unwrap();
 
-        let scores = payload.node_scores.as_ref().expect("node_scores should be populated");
+        let scores = payload
+            .node_scores
+            .as_ref()
+            .expect("node_scores should be populated");
         assert_eq!(scores.len(), 3);
         // Should be sorted by score descending.
         assert_eq!(scores[0].0, "machine|NOUN");
@@ -3111,21 +3100,22 @@ mod tests {
     fn test_debug_build_full_includes_residuals() {
         // Build with diagnostics enabled.
         let (graph, _) = debug_test_graph_and_ranks();
-        let ranks = RankOutput::from_pagerank_result(
-            &crate::pagerank::PageRankResult {
-                scores: vec![0.5, 0.3, 0.2],
-                iterations: 3,
-                delta: 1e-7,
-                converged: true,
-            },
-        )
+        let ranks = RankOutput::from_pagerank_result(&crate::pagerank::PageRankResult {
+            scores: vec![0.5, 0.3, 0.2],
+            iterations: 3,
+            delta: 1e-7,
+            converged: true,
+        })
         .with_diagnostics(RankDiagnostics {
             residuals: vec![0.1, 0.01, 0.001],
         });
 
         let payload = DebugPayload::build(DebugLevel::Full, &graph, &ranks, 50).unwrap();
 
-        let residuals = payload.residuals.as_ref().expect("residuals should be populated at Full level");
+        let residuals = payload
+            .residuals
+            .as_ref()
+            .expect("residuals should be populated at Full level");
         assert_eq!(residuals.len(), 3);
         assert!((residuals[0] - 0.1).abs() < 1e-10);
         // Also includes node_scores and stats (superset).
@@ -3153,7 +3143,9 @@ mod tests {
 
         let payload = DebugPayload::build(DebugLevel::Full, &graph, &ranks, 50).unwrap();
 
-        let memberships = payload.cluster_memberships.as_ref()
+        let memberships = payload
+            .cluster_memberships
+            .as_ref()
             .expect("cluster_memberships should be populated for topic-family");
         assert_eq!(memberships.len(), 2);
         assert_eq!(memberships[0], vec![0, 1]);
@@ -3178,18 +3170,19 @@ mod tests {
         builder.increment_edge(a, b, 1.0);
         let graph = Graph::from_builder(&builder);
 
-        let ranks = RankOutput::from_pagerank_result(
-            &crate::pagerank::PageRankResult {
-                scores: vec![0.5, 0.5],
-                iterations: 10,
-                delta: 1e-7,
-                converged: true,
-            },
-        );
+        let ranks = RankOutput::from_pagerank_result(&crate::pagerank::PageRankResult {
+            scores: vec![0.5, 0.5],
+            iterations: 10,
+            delta: 1e-7,
+            converged: true,
+        });
 
         let payload = DebugPayload::build(DebugLevel::TopNodes, &graph, &ranks, 50).unwrap();
         let scores = payload.node_scores.as_ref().unwrap();
-        assert_eq!(scores[0].0, "alpha|NOUN", "Equal scores should sort by lemma ascending");
+        assert_eq!(
+            scores[0].0, "alpha|NOUN",
+            "Equal scores should sort by lemma ascending"
+        );
         assert_eq!(scores[1].0, "zebra|NOUN");
     }
 
@@ -3253,12 +3246,18 @@ mod tests {
     fn test_debug_level_from_str() {
         assert_eq!(DebugLevel::from_str("none"), Some(DebugLevel::None));
         assert_eq!(DebugLevel::from_str("stats"), Some(DebugLevel::Stats));
-        assert_eq!(DebugLevel::from_str("top_nodes"), Some(DebugLevel::TopNodes));
+        assert_eq!(
+            DebugLevel::from_str("top_nodes"),
+            Some(DebugLevel::TopNodes)
+        );
         assert_eq!(DebugLevel::from_str("topnodes"), Some(DebugLevel::TopNodes));
         assert_eq!(DebugLevel::from_str("full"), Some(DebugLevel::Full));
         // Case-insensitive.
         assert_eq!(DebugLevel::from_str("STATS"), Some(DebugLevel::Stats));
-        assert_eq!(DebugLevel::from_str("Top_Nodes"), Some(DebugLevel::TopNodes));
+        assert_eq!(
+            DebugLevel::from_str("Top_Nodes"),
+            Some(DebugLevel::TopNodes)
+        );
         // Unknown.
         assert_eq!(DebugLevel::from_str("verbose"), None);
         assert_eq!(DebugLevel::from_str(""), None);
@@ -3280,10 +3279,22 @@ mod tests {
 
     #[test]
     fn test_debug_level_serde_values() {
-        assert_eq!(serde_json::to_string(&DebugLevel::None).unwrap(), r#""none""#);
-        assert_eq!(serde_json::to_string(&DebugLevel::Stats).unwrap(), r#""stats""#);
-        assert_eq!(serde_json::to_string(&DebugLevel::TopNodes).unwrap(), r#""top_nodes""#);
-        assert_eq!(serde_json::to_string(&DebugLevel::Full).unwrap(), r#""full""#);
+        assert_eq!(
+            serde_json::to_string(&DebugLevel::None).unwrap(),
+            r#""none""#
+        );
+        assert_eq!(
+            serde_json::to_string(&DebugLevel::Stats).unwrap(),
+            r#""stats""#
+        );
+        assert_eq!(
+            serde_json::to_string(&DebugLevel::TopNodes).unwrap(),
+            r#""top_nodes""#
+        );
+        assert_eq!(
+            serde_json::to_string(&DebugLevel::Full).unwrap(),
+            r#""full""#
+        );
     }
 
     #[test]
@@ -3371,9 +3382,7 @@ mod tests {
     #[should_panic(expected = "called words() on non-word CandidateSet")]
     fn test_sentence_candidates_accessor_panics() {
         use crate::types::{PosTag, Token};
-        let tokens = vec![
-            Token::new("Hello", "hello", PosTag::Noun, 0, 5, 0, 0),
-        ];
+        let tokens = vec![Token::new("Hello", "hello", PosTag::Noun, 0, 5, 0, 0)];
         let stream = TokenStream::from_tokens(&tokens);
         let cs = CandidateSet::from_sentence_boundaries(&stream);
         let _ = cs.words(); // should panic

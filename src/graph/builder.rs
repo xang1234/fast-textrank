@@ -1120,8 +1120,7 @@ mod tests {
             tokens.push(make_token("gamma", "gamma", sent_idx, sent_idx * 3 + 2));
         }
 
-        let seq_builder =
-            GraphBuilder::from_tokens_with_pos(&tokens, 2, true, None, false);
+        let seq_builder = GraphBuilder::from_tokens_with_pos(&tokens, 2, true, None, false);
         let par_builder = build_graph_parallel_with_pos(&tokens, 2, true, None, false);
 
         let seq_csr = CsrGraph::from_builder(&seq_builder);

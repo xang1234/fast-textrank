@@ -607,33 +607,63 @@ mod tests {
                 text: "machine learning".into(),
                 lemma: "machine learning".into(),
                 terms: terms(&["machine", "learning"]),
-                chunk: ChunkSpan { start_token: 0, end_token: 2, start_char: 0, end_char: 16, sentence_idx: 0 },
+                chunk: ChunkSpan {
+                    start_token: 0,
+                    end_token: 2,
+                    start_char: 0,
+                    end_char: 16,
+                    sentence_idx: 0,
+                },
             },
             PhraseCandidate {
                 text: "machine learning".into(),
                 lemma: "machine learning".into(),
                 terms: terms(&["machine", "learning"]),
-                chunk: ChunkSpan { start_token: 10, end_token: 12, start_char: 80, end_char: 96, sentence_idx: 2 },
+                chunk: ChunkSpan {
+                    start_token: 10,
+                    end_token: 12,
+                    start_char: 80,
+                    end_char: 96,
+                    sentence_idx: 2,
+                },
             },
             // Cluster B: identical terms → will merge
             PhraseCandidate {
                 text: "neural network".into(),
                 lemma: "neural network".into(),
                 terms: terms(&["neural", "network"]),
-                chunk: ChunkSpan { start_token: 4, end_token: 6, start_char: 30, end_char: 44, sentence_idx: 1 },
+                chunk: ChunkSpan {
+                    start_token: 4,
+                    end_token: 6,
+                    start_char: 30,
+                    end_char: 44,
+                    sentence_idx: 1,
+                },
             },
             PhraseCandidate {
                 text: "neural networks".into(),
                 lemma: "neural network".into(),
                 terms: terms(&["neural", "network"]),
-                chunk: ChunkSpan { start_token: 14, end_token: 16, start_char: 110, end_char: 126, sentence_idx: 3 },
+                chunk: ChunkSpan {
+                    start_token: 14,
+                    end_token: 16,
+                    start_char: 110,
+                    end_char: 126,
+                    sentence_idx: 3,
+                },
             },
             // Cluster C: singleton
             PhraseCandidate {
                 text: "data analysis".into(),
                 lemma: "data analysis".into(),
                 terms: terms(&["data", "analysis"]),
-                chunk: ChunkSpan { start_token: 7, end_token: 9, start_char: 50, end_char: 63, sentence_idx: 1 },
+                chunk: ChunkSpan {
+                    start_token: 7,
+                    end_token: 9,
+                    start_char: 50,
+                    end_char: 63,
+                    sentence_idx: 1,
+                },
             },
         ];
 
@@ -668,12 +698,16 @@ mod tests {
         for i in 0..n {
             let node = builder.get_node(i as u32).unwrap();
             for j in 0..n {
-                if i == j { continue; }
+                if i == j {
+                    continue;
+                }
                 if topic_of[i] == topic_of[j] {
                     assert!(
                         !node.edges.contains_key(&(j as u32)),
                         "Intra-topic edge found: c_{} → c_{} (both topic {})",
-                        i, j, topic_of[i],
+                        i,
+                        j,
+                        topic_of[i],
                     );
                 }
             }
@@ -726,10 +760,7 @@ mod tests {
             .zip(result_flat.phrases.iter())
             .any(|(a, b)| a.lemma != b.lemma || (a.score - b.score).abs() > 1e-10);
 
-        assert!(
-            any_rank_diff,
-            "Alpha boost should change ranking or scores"
-        );
+        assert!(any_rank_diff, "Alpha boost should change ranking or scores");
     }
 
     // ─── MultipartiteRank golden test ────────────────────────────

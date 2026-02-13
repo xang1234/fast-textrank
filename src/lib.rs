@@ -43,11 +43,10 @@ pub use phrase::extraction::PhraseExtractor;
 pub use pipeline::error_code::ErrorCode;
 pub use pipeline::errors::{PipelineRuntimeError, PipelineSpecError};
 pub use pipeline::spec::{
-    CandidatesSpec, ClusteringSpec, EdgeWeightingSpec, ExposeSpec, FormatSpec,
-    GraphSpec, GraphTransformSpec, ModuleSet, NodeScoresSpec, PageRankExposeSpec,
-    PhraseGroupingSpec, PhraseSpec, PipelineSpec, PipelineSpecV1, PreprocessSpec,
-    RankSpec, RuntimeSpec, ScoreAggregationSpec, TeleportSpec,
-    merge_modules, resolve_preset, resolve_spec,
+    merge_modules, resolve_preset, resolve_spec, CandidatesSpec, ClusteringSpec, EdgeWeightingSpec,
+    ExposeSpec, FormatSpec, GraphSpec, GraphTransformSpec, ModuleSet, NodeScoresSpec,
+    PageRankExposeSpec, PhraseGroupingSpec, PhraseSpec, PipelineSpec, PipelineSpecV1,
+    PreprocessSpec, RankSpec, RuntimeSpec, ScoreAggregationSpec, TeleportSpec,
 };
 pub use pipeline::validation::{ValidationEngine, ValidationReport};
 pub use pipeline::{
@@ -55,18 +54,17 @@ pub use pipeline::{
     ClusterAssignments, Clusterer, CooccurrenceGraphBuilder, DebugLevel, DynPipeline,
     EdgeWeightPolicy, FocusTermsTeleportBuilder, IntraTopicEdgeRemover, JaccardHacClusterer,
     Linkage, MultipartitePhraseBuilder, MultipartiteRankPipeline, MultipartiteTransform,
-    NoopClusterer, NoopGraphTransform, NoopPreprocessor, PhraseBuilder, SpecPipelineBuilder,
-    TopicGraphBuilder, TopicRankPipeline, TopicRepresentativeBuilder,
-    TopicWeightsTeleportBuilder, TopicalPageRankPipeline, PhraseCandidateSelector,
-    PositionTeleportBuilder, Preprocessor, ResultFormatter, StandardResultFormatter,
-    TeleportBuilder, TeleportType, TeleportVector, TokenEntry, TokenStream, TokenStreamRef,
-    UniformTeleportBuilder, WindowGraphBuilder, WindowStrategy, WordNodeSelector,
-    DEFAULT_WINDOW_SIZE,
+    NoopClusterer, NoopGraphTransform, NoopPreprocessor, PhraseBuilder, PhraseCandidateSelector,
+    PositionTeleportBuilder, Preprocessor, ResultFormatter, SpecPipelineBuilder,
+    StandardResultFormatter, TeleportBuilder, TeleportType, TeleportVector, TokenEntry,
+    TokenStream, TokenStreamRef, TopicGraphBuilder, TopicRankPipeline, TopicRepresentativeBuilder,
+    TopicWeightsTeleportBuilder, TopicalPageRankPipeline, UniformTeleportBuilder,
+    WindowGraphBuilder, WindowStrategy, WordNodeSelector, DEFAULT_WINDOW_SIZE,
 };
 #[cfg(feature = "sentence-rank")]
 pub use pipeline::{
-    SentenceCandidateSelector, SentenceFormatter, SentenceGraphBuilder,
-    SentencePhraseBuilder, SentenceRankPipeline,
+    SentenceCandidateSelector, SentenceFormatter, SentenceGraphBuilder, SentencePhraseBuilder,
+    SentenceRankPipeline,
 };
 // Note: pipeline::GraphBuilder trait is NOT re-exported here to avoid
 // collision with graph::builder::GraphBuilder (the mutable builder struct).
@@ -89,9 +87,7 @@ mod determinism_golden_tests {
     //! Run each variant twice in deterministic mode and assert bit-exact output.
     //! These tests catch non-determinism regressions in CI.
 
-    use crate::phrase::extraction::{
-        extract_keyphrases_with_info, ExtractionResult,
-    };
+    use crate::phrase::extraction::{extract_keyphrases_with_info, ExtractionResult};
     use crate::types::{DeterminismMode, PosTag, TextRankConfig, Token};
     use crate::variants::biased_textrank::BiasedTextRank;
     use crate::variants::multipartite_rank::MultipartiteRank;
