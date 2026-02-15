@@ -20,6 +20,13 @@ TopicalPageRank = {}
 MultipartiteRank = {}
 SentenceRank = { feature = "sentence-rank" }
 BatchIter = {}
+DebugPayload = {}
+GraphStats = {}
+ConvergenceSummary = {}
+PhraseSplitEvent = {}
+DroppedCandidate = {}
+ClusterMember = {}
+ClusterDetail = {}
 
 [functions]
 get_stopwords = {}

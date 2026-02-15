@@ -24,6 +24,13 @@ from rapid_textrank._rust import (
     BatchIter,
     validate_pipeline_spec,
     get_stopwords,
+    DebugPayload,
+    GraphStats,
+    ConvergenceSummary,
+    PhraseSplitEvent,
+    DroppedCandidate,
+    ClusterMember,
+    ClusterDetail,
 )
 
 __all__ = [
@@ -45,6 +52,13 @@ __all__ = [
     "BatchIter",
     "validate_pipeline_spec",
     "get_stopwords",
+    "DebugPayload",
+    "GraphStats",
+    "ConvergenceSummary",
+    "PhraseSplitEvent",
+    "DroppedCandidate",
+    "ClusterMember",
+    "ClusterDetail",
     "topic_weights_from_lda",
 ]
 
